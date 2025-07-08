@@ -1,0 +1,7 @@
+---
+title: "Project1"
+---
+
+# Project1
+
+{{< include subproject1/index.qmd >}}
