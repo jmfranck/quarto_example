@@ -8,16 +8,17 @@ title: "Project1 SubProject1 Tasks"
 
 ### Question: Improve Data Processing
 
-#### Task 1 {#task:1}
+#### Task 1 {#sec:task1}
 
 Implement data normalization for the dataset.
 <obs author="JMF" date="1/8/25 4:17pm">implemented the normalization!</obs>
 Let's also make sure that this $x^2$ is rendered as math with mathjax!!
 Also make sure that we have *italics* and **bold**.
 
-#### Task 2 {#task:2}
+#### Task 2 {#sec:task2}
 
 Write visualization routines for exploratory analysis.
+
 ```{python}
 from numpy import r_
 from pylab import plot, legend

@@ -1,6 +1,6 @@
 project:
   type: website
-  files:
+  render:
     - 2025-07-08.qmd
     - project1/subproject1/tasks.qmd
 

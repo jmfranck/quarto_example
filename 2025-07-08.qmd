@@ -6,5 +6,5 @@ title: "Daily Log: 2025-07-08"
 
 This notebook links to specific tasks in subprojects:
 
-- Task 1: See Section @task:1.
-- Task 2: See Section @task:2.
+- Task 1: See [Task 1](project1/subproject1/tasks.qmd#sec:task1).
+- Task 2: See [Task 2](project1/subproject1/tasks.qmd#sec:task2).
