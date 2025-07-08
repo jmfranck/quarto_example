@@ -1,0 +1,15 @@
+project:
+  type: website
+  files:
+    - 2025-07-08.qmd
+    - project1/subproject1/tasks.qmd
+
+execute:
+  cache: true
+  jupyter: python3
+
+format:
+  html:
+    extensions: [markdown+raw_xml]
+
+filters: [obs.lua]

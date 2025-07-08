@@ -1,0 +1,15 @@
+---
+title: "Project1 SubProject1 Tasks"
+---
+
+# Project1
+
+## SubProject1
+
+### Question: Improve Data Processing
+
+#### Task 1 {#task:1}
+Implement data normalization for the dataset.
+
+#### Task 2 {#task:2}
+Write visualization routines for exploratory analysis.
