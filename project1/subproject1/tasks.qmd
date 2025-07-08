@@ -11,7 +11,7 @@ title: "Project1 SubProject1 Tasks"
 #### Task 1 {#sec:task1}
 
 Implement data normalization for the dataset.
-<obs author="JMF" date="1/8/25 4:17pm">implemented the normalization!</obs>
+<obs author="JMF" date="1/8/25 4:17pm">implemented the normalization! Make sure *markdown* still **works** $\frac{x}{y}$</obs>
 Let's also make sure that this $x^2$ is rendered as math with mathjax!!
 Also make sure that we have *italics* and **bold**.
 
