@@ -18,6 +18,7 @@ if ! command -v quarto >/dev/null 2>&1; then
   fi
   sudo apt-get update -y
   sudo apt-get install -y ./quarto-1.7.32-linux-amd64.deb
+  cp githooks/pre-commit .git/hooks/pre-commit
 fi
 # Replace shorthand cross-references
 python3 resolve_refs.py

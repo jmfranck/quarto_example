@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Generate tags for Quarto cross references
+# Generate tags for Python and Quarto files while ignoring the built output
+
 ctags -R \
+  --exclude=_site \
   --langdef=quarto --langmap=quarto:.qmd \
-  --regex-quarto='/\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}/\2/s,section/' \
-  --regex-quarto='/\[[^\]]+\]\([^#]+#(sec|fig|tab):([A-Za-z0-9_-]+)\)/\2/r,ref/' \
+  --languages=Python,quarto \
+  --regex-quarto='/\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}/\1:\2/s,section/' \
+  --regex-quarto='/\[[^\]]+\]\([^#]+#(sec|fig|tab):([A-Za-z0-9_-]+)\)/\1:\2/r,ref/' \
   -f tags
