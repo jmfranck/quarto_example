@@ -10,6 +10,6 @@ execute:
 
 format:
   html:
-    extensions: [markdown+raw_xml]
+    extensions: [markdown+raw_html]
 
 filters: [obs.lua]
