@@ -2,4 +2,6 @@
 /_site/
 /preview.log
 /quarto-1.7.32-linux-amd64.deb
+**/.jupyter_cache/
+*.quarto_ipynb
 tags
