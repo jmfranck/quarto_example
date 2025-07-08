@@ -8,8 +8,8 @@ title: "Project1 SubProject1 Tasks"
 
 ### Question: Improve Data Processing
 
-#### Task 1 {#task:1}
+#### Task 1 {#sec:task1}
 Implement data normalization for the dataset.
 
-#### Task 2 {#task:2}
+#### Task 2 {#sec:task2}
 Write visualization routines for exploratory analysis.
