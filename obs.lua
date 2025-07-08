@@ -1,23 +1,62 @@
 -- obs.lua
-local read_inline = pandoc.read_inline
 
-function RawInline(el)
-  if el.format == "html" then
-    local t,a,inner = el.text:match(
-      '^<obs%s+time="([^"]+)"%s+author="([^"]-)">(.-)</obs>$'
-    )
-    if t then
-      local prefix = pandoc.Span(
-        { pandoc.Str(t .. " " .. a .. ":") },
-        { attributes = { style = "color:green;" } }
-      )
-      local inls = read_inline(inner).content
-      local body = pandoc.Span(
-        inls,
-        { attributes = { style = "color:blue;" } }
-      )
-      return { prefix, pandoc.Space(), body }
-    end
-  end
-  return nil
+-- Process custom <obs> tags. These appear in the input as RawInline elements
+-- for the opening and closing tags. The content between them should continue to
+-- be parsed as normal markdown. This filter converts:
+--   <obs author="NAME" date="DATE">content</obs>
+-- into a span containing the author/date (smaller and green) followed by the
+-- content colored blue.
+
+local function parse_attrs(attr)
+  local author = attr:match('author="([^"]+)"')
+  local when = attr:match('time="([^"]+)"') or attr:match('date="([^"]+)"')
+  return author, when
 end
+
+function Inlines(inls)
+  local out = {}
+  local i = 1
+  while i <= #inls do
+    local el = inls[i]
+    if el.t == 'RawInline' and el.format == 'html' then
+      local attr = el.text:match('^<obs%s+([^>]+)>$')
+      if attr then
+        -- gather inner content up to the closing tag
+        local inner = {}
+        local j = i + 1
+        while j <= #inls do
+          local cur = inls[j]
+          if cur.t == 'RawInline' and cur.format == 'html' and cur.text:match('^</obs>$') then
+            break
+          else
+            table.insert(inner, cur)
+          end
+          j = j + 1
+        end
+        if j <= #inls then
+          local author, when = parse_attrs(attr)
+          if author and when then
+            local prefix = pandoc.Span(
+              { pandoc.Str(when .. ' ' .. author .. ':') },
+              pandoc.Attr('', {}, { style = 'font-size:85%; color:green;' })
+            )
+            local body = pandoc.Span(
+              pandoc.List(inner),
+              pandoc.Attr('', {}, { style = 'color:blue;' })
+            )
+            table.insert(out, prefix)
+            table.insert(out, pandoc.Space())
+            table.insert(out, body)
+            i = j + 1
+            goto continue
+          end
+        end
+      end
+    end
+    table.insert(out, el)
+    i = i + 1
+    ::continue::
+  end
+  return out
+end
+
