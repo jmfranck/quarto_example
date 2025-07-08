@@ -1,8 +1,15 @@
+
 project:
   type: website
   render:
-    - 2025-07-08.qmd
+    - notebook250708.qmd
     - project1/subproject1/tasks.qmd
+
+website:
+  sidebar:
+    contents:
+      - notebook250708.qmd
+      - project1/subproject1/tasks.qmd
 
 execute:
   cache: true
@@ -10,6 +17,9 @@ execute:
 
 format:
   html:
+    toc: true
+    toc-depth: 4
+    toc-location: right
     extensions: [markdown+raw_html]
 
 filters: [obs.lua]
