@@ -1,7 +1,8 @@
 ---
 title: "Project1"
+format:
+  html:
+    title-block-style: none
 ---
-
-# Project1
 
 {{< include subproject1/index.qmd >}}

@@ -21,5 +21,6 @@ format:
     toc-depth: 4
     toc-location: right
     extensions: [markdown+raw_html]
+    title-block-style: none
 
 filters: [obs.lua]
