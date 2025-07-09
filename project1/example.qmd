@@ -1,0 +1,22 @@
+# Example project
+
+This is an example project!! I'm learning to plot in python!
+
+## some basic examples!
+
+### example plot {#sec:examplePlot1}
+
+Here's an example plot! <obs time="7/8/25 20:08" author="JF">this
+is what I observe about the plot</obs> <err> <obs
+time="7/8/25 20:06" author="JF">I had some problems making the
+plot</obs> then I do some stuff to fix the problems <obs
+time="7/8/25 20:08" author="JF">here are notes about the specific
+solution</obs> </err>
+
+```{python}
+from pylab import *
+from pyspecdata import *
+with figlist_var() as fl:
+    fl.next('this is a plot')
+    fl.plot(r_[0:10])
+```
