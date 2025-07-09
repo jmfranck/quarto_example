@@ -16,6 +16,7 @@ website:
 execute:
   cache: true
   jupyter: python3
+  fig-width: 1.0
 
 format:
   html:
