@@ -21,6 +21,17 @@ Here's an example plot!
     <obs time="7/8/25 20:08" author="JF">here are notes about the specific solution</obs>
 </err>
 
+<obs time="11/27 16:51">the `alec_BRD` branch doesn't support the 1.5D regularization directly! -- this is why we need the loop</obs>
+<obs time="2/15/24 11:55">on coming back to this, note that I have 1.5D working from the $^2$H paper, just note with BRD yet</obs>
+
+<err>
+     fix (in file save script): slicing by index yells at me, maybe?
+
+    fix (in file save script): trying to convolve gives me a fine grating, like there's a problem with the enforce causality thing?
+
+    fix (in file save script): two sets of double brackets for assignment doesn't work but comma-separated version works.
+</err>
+
 ```{python}
 from pylab import *
 from pyspecdata import *
