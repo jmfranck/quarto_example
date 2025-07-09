@@ -164,7 +164,7 @@ def format_observations(text: str) -> str:
     return obs_re.sub(repl, text)
 
 
-def format_tags(text: str, indent_str: str = '    ') -> str:
+def format_tags(text: str, indent_str: str = '  ') -> str:
     """Format <err> blocks with indentation and tidy <obs> tags."""
     text = format_observations(text)
     # normalize whitespace around err tags
