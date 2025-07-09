@@ -100,9 +100,21 @@ function Blocks(blocks)
       local inlines = blk.content
       for pos, inline in ipairs(inlines) do
         if inline.t == 'RawInline' and inline.format == 'html' and inline.text == '<err>' then
+          -- capture text before the <err> tag
+          if pos > 1 then
+            local before = pandoc.List{}
+            for k = 1, pos - 1 do
+              before:insert(inlines[k])
+            end
+            if #before > 0 then
+              out:insert(pandoc.Para(before))
+            end
+          end
+
           local inner = pandoc.List{}
           local closing_in_para = false
           local rest = pandoc.List{}
+          local after = pandoc.List{}
           local j = pos + 1
           while j <= #inlines do
             local cur = inlines[j]
@@ -117,26 +129,42 @@ function Blocks(blocks)
           if #rest > 0 then
             inner:insert(pandoc.Para(rest))
           end
-          if not closing_in_para then
+          if closing_in_para then
+            if j + 1 <= #inlines then
+              for k = j + 1, #inlines do
+                after:insert(inlines[k])
+              end
+            end
+          else
             i = i + 1
             while i <= #blocks do
               local cur = blocks[i]
               local closing_found = false
               if cur.t == 'Para' then
+                local before_close = pandoc.List{}
                 for cpos, cin in ipairs(cur.content) do
                   if cin.t == 'RawInline' and cin.format == 'html' and cin.text == '</err>' then
                     if cpos > 1 then
-                      local before = pandoc.List{}
                       for k = 1, cpos - 1 do
-                        before:insert(cur.content[k])
+                        before_close:insert(cur.content[k])
                       end
-                      if #before > 0 then
-                        inner:insert(pandoc.Para(before))
+                      if #before_close > 0 then
+                        inner:insert(pandoc.Para(before_close))
+                      end
+                    end
+                    if cpos + 1 <= #cur.content then
+                      for k = cpos + 1, #cur.content do
+                        after:insert(cur.content[k])
                       end
                     end
                     closing_found = true
                     break
+                  else
+                    before_close:insert(cin)
                   end
+                end
+                if not closing_found and #before_close > 0 then
+                  inner:insert(pandoc.Para(before_close))
                 end
               end
               if closing_found then
@@ -153,6 +181,9 @@ function Blocks(blocks)
           local body = pandoc.Div(inner, pandoc.Attr('', {}, {style = 'margin:10px; border:0px;'}))
           local div = pandoc.Div({header, body}, pandoc.Attr('', {}, {style = 'margin:0px; border:1px solid grey; padding:0px;'}))
           out:insert(div)
+          if #after > 0 then
+            out:insert(pandoc.Para(after))
+          end
           handled = true
           break
         end

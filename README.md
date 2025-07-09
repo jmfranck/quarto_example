@@ -28,3 +28,14 @@ start the preview server:
 
 The script installs Quarto if it isn't available and then runs the preview
 server without opening a browser.
+
+## Rendering a Document
+
+To render a single document without executing its code (useful when
+dependencies for execution aren't installed), run:
+
+```bash
+quarto render project1/example.qmd --no-execute
+```
+
+The resulting HTML will be placed in the `_site` directory.
