@@ -140,12 +140,17 @@ def format_observations(text: str, width: int = 80) -> str:
 def format_tags(text: str, indent_str: str = '    ') -> str:
     """Format <err> blocks with indentation and wrap <obs> tags."""
     text = format_observations(text)
+    # ensure opening obs tags start on a new line
+    text = re.sub(r'\n[ \t]*(<obs)', r'\n\1', text)
+    text = re.sub(r'(?<!^)(?<!\n)(<obs)', r'\n\1', text)
+    text = re.sub(r'<err>[ \t]*\n+', '<err>\n', text)
     # ensure exactly one newline after closing obs tags
     text = re.sub(r'</obs>\s*', '</obs>\n', text)
     pattern = re.compile(r'(<err>|</err>)')
     parts = pattern.split(text)
     out = []
     indent = 0
+    prev_tag = None
     for part in parts:
         if not part:
             continue
@@ -154,18 +159,23 @@ def format_tags(text: str, indent_str: str = '    ') -> str:
                 out[-1] = out[-1].rstrip() + '\n'
             out.append(indent_str * indent + '<err>\n')
             indent += 1
+            prev_tag = '<err>'
         elif part == '</err>':
             if out and not out[-1].endswith('\n'):
                 out[-1] = out[-1].rstrip() + '\n'
             indent -= 1
             out.append(indent_str * indent + '</err>\n')
+            prev_tag = '</err>'
         else:
+            if prev_tag in ('<err>', '</err>') and part.startswith('\n'):
+                part = part[1:]
             lines = part.splitlines(True)
             for line in lines:
                 if line.strip():
                     out.append(indent_str * indent + line.lstrip())
                 else:
                     out.append(line)
+            prev_tag = None
     formatted = ''.join(out)
     return re.sub(r'[ \t]+(?=\n)', '', formatted)
 
