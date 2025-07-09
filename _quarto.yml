@@ -16,7 +16,8 @@ website:
 execute:
   cache: true
   jupyter: python3
-  fig-width: 1.0
+  fig-width: 6.0
+  fig-height: 3.708282 # aspect 1.618
 
 format:
   html:
