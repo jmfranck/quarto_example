@@ -73,38 +73,44 @@ def preprocess_latex(src: str) -> str:
         flags=re.S,
     )
 
-    # handle \o[...]{} observations
+    # handle \o[...]{} and \o{} observations
     out = []
     i = 0
     while True:
-        idx = src.find('\\o[', i)
+        idx_bracket = src.find('\\o[', i)
+        idx_brace = src.find('\\o{', i)
+        idxs = [x for x in (idx_bracket, idx_brace) if x != -1]
+        idx = min(idxs) if idxs else -1
         if idx == -1:
             out.append(src[i:])
             break
         out.append(src[i:idx])
         j = idx + 2
-        if j >= len(src) or src[j] != '[':
-            out.append(src[idx:])
-            break
-        end_attrs = find_matching(src, j, '[', ']')
-        if end_attrs == -1:
-            out.append(src[idx:])
-            break
-        attrs = src[j + 1:end_attrs]
-        j = end_attrs + 1
+        attrs = ''
+        if j < len(src) and src[j] == '[':
+            end_attrs = find_matching(src, j, '[', ']')
+            if end_attrs == -1:
+                out.append(src[idx:])
+                break
+            attrs = src[j + 1:end_attrs]
+            j = end_attrs + 1
         if j >= len(src) or src[j] != '{':
-            out.append(src[idx:])
-            break
+            out.append(src[idx:idx+2])
+            i = idx + 2
+            continue
         end_body = find_matching(src, j, '{', '}')
         if end_body == -1:
             out.append(src[idx:])
             break
         body = src[j + 1:end_body]
         j = end_body + 1
-        m = re.match(r'(.*?)\s*(\(([^)]+)\))?$', attrs.strip())
-        time = m.group(1).strip() if m else attrs.strip()
-        author = m.group(3) if m else None
-        tag = f'<obs time="{time}"' + (f' author="{author}"' if author else '') + f'>{body}</obs>'
+        if attrs:
+            m = re.match(r'(.*?)\s*(\(([^)]+)\))?$', attrs.strip())
+            time = m.group(1).strip() if m else attrs.strip()
+            author = m.group(3) if m else None
+            tag = f'<obs time="{time}"' + (f' author="{author}"' if author else '') + f'>{body}</obs>'
+        else:
+            tag = f'<obs>{body}</obs>'
         out.append(tag)
         i = j
     return ''.join(out)
