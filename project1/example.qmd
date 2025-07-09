@@ -22,7 +22,7 @@ Here's an example plot!
 </err>
 <obs time="11/27 16:51">Make sure there is no space betwen the err and obs here!!</obs>
 <obs time="2/15/24 11:55">another observation</obs>
-ø$\checkmark$
+<obs>$\checkmark$</obs>
 
 <err>
     Make sure that this line lines up with the following lines.
@@ -33,6 +33,13 @@ Here's an example plot!
 </err>
 
 ```{python}
+%reset -f
+from pylab import *
+plot(r_[0:10])
+```
+
+```{python}
+%reset -f
 from pylab import *
 from pyspecdata import *
 with figlist_var() as fl:

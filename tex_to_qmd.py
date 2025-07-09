@@ -123,11 +123,13 @@ def clean_html_escapes(text: str) -> str:
 def finalize_markers(text: str) -> str:
     lines = []
     in_py = False
+    need_reset = False
     in_verb = False
     for line in text.splitlines(keepends=True):
         if re.match(r'^\s*%%PYTHON_START%%', line):
             lines.append('```{python}\n')
             in_py = True
+            need_reset = True
             continue
         if re.match(r'^\s*%%PYTHON_END%%', line):
             lines.append('```\n')
@@ -141,7 +143,18 @@ def finalize_markers(text: str) -> str:
             lines.append('```\n')
             in_verb = False
             continue
-        if (in_py or in_verb) and line.startswith('    '):
+        if in_py:
+            stripped = line[4:] if line.startswith('    ') else line
+            if need_reset:
+                if stripped.lstrip().startswith('%reset'):
+                    lines.append(stripped)
+                else:
+                    lines.append('%reset -f\n')
+                    lines.append(stripped)
+                need_reset = False
+            else:
+                lines.append(stripped)
+        elif in_verb and line.startswith('    '):
             lines.append(line[4:])
         else:
             lines.append(line)
