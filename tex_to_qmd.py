@@ -109,36 +109,24 @@ def finalize_markers(text: str) -> str:
     return ''.join(lines)
 
 
-def format_observations(text: str, width: int = 80) -> str:
-    """Wrap observation tags so opening/closing are on the same line."""
+def format_observations(text: str) -> str:
+    """Ensure observation tags sit on a single line without altering content."""
 
     obs_re = re.compile(r'(<obs[^>]*>)(.*?)(</obs>)', flags=re.S)
 
     def repl(match: re.Match) -> str:
-        open_tag = re.sub(r'\s+', ' ', match.group(1).strip())
-        body = re.sub(r'\s+', ' ', match.group(2).strip())
-        words = body.split()
-        prefix = open_tag
-        lines = []
-        line = prefix
-        avail = width - len('</obs>')
-        for w in words:
-            if len(line) + 1 + len(w) > avail:
-                lines.append(line)
-                line = ' ' * len(prefix) + w
-            else:
-                if line == prefix:
-                    line += ' ' + w
-                else:
-                    line += ' ' + w
-        lines.append(line + '</obs>')
-        return '\n'.join(lines)
+        open_tag = match.group(1).strip()
+        body = match.group(2)
+        close_tag = match.group(3).strip()
+        # trim newlines that may surround the body but keep internal whitespace
+        body = body.lstrip('\n').rstrip('\n')
+        return f"{open_tag}{body}{close_tag}"
 
     return obs_re.sub(repl, text)
 
 
 def format_tags(text: str, indent_str: str = '    ') -> str:
-    """Format <err> blocks with indentation and wrap <obs> tags."""
+    """Format <err> blocks with indentation and tidy <obs> tags."""
     text = format_observations(text)
     # ensure opening obs tags start on a new line
     text = re.sub(r'\n[ \t]*(<obs)', r'\n\1', text)
@@ -202,7 +190,13 @@ def main():
     Path(mid_path).unlink()  # we just want the name; pandoc will create it
 
     try:
-        subprocess.run(['quarto', 'pandoc', pre_path, '-f', 'latex', '-t', 'markdown', '-o', mid_path], check=True)
+        subprocess.run([
+            'quarto', 'pandoc', pre_path,
+            '-f', 'latex',
+            '-t', 'markdown',
+            '--wrap=none',
+            '-o', mid_path
+        ], check=True)
     finally:
         Path(pre_path).unlink(missing_ok=True)
 
