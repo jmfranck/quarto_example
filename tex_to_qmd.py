@@ -6,6 +6,22 @@ import tempfile
 from pathlib import Path
 
 
+def find_matching(text: str, start: int, open_ch: str, close_ch: str) -> int:
+    """Return index of matching close_ch for open_ch at *start* or -1."""
+    depth = 1
+    i = start + 1
+    while i < len(text):
+        c = text[i]
+        if c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
 def preprocess_latex(src: str) -> str:
     """Convert custom environments and observation macros before pandoc."""
 
@@ -46,26 +62,21 @@ def preprocess_latex(src: str) -> str:
         if j >= len(src) or src[j] != '[':
             out.append(src[idx:])
             break
-        j += 1
-        k = src.find(']', j)
-        if k == -1:
+        end_attrs = find_matching(src, j, '[', ']')
+        if end_attrs == -1:
             out.append(src[idx:])
             break
-        attrs = src[j:k]
-        j = k + 1
+        attrs = src[j + 1:end_attrs]
+        j = end_attrs + 1
         if j >= len(src) or src[j] != '{':
             out.append(src[idx:])
             break
-        j += 1
-        depth = 1
-        start = j
-        while j < len(src) and depth > 0:
-            if src[j] == '{':
-                depth += 1
-            elif src[j] == '}':
-                depth -= 1
-            j += 1
-        body = src[start:j - 1]
+        end_body = find_matching(src, j, '{', '}')
+        if end_body == -1:
+            out.append(src[idx:])
+            break
+        body = src[j + 1:end_body]
+        j = end_body + 1
         m = re.match(r'(.*?)\s*(\(([^)]+)\))?$', attrs.strip())
         time = m.group(1).strip() if m else attrs.strip()
         author = m.group(3) if m else None
@@ -96,6 +107,43 @@ def finalize_markers(text: str) -> str:
         else:
             lines.append(line)
     return ''.join(lines)
+
+
+def format_tags(text: str, indent_str: str = '    ') -> str:
+    """Ensure obs/err tags are on their own lines and indent err blocks."""
+    pattern = re.compile(r'(<err>|</err>|<obs[^>]*>|</obs>)')
+    parts = pattern.split(text)
+    out = []
+    indent = 0
+    for part in parts:
+        if not part:
+            continue
+        if part == '<err>':
+            if out and not out[-1].endswith('\n'):
+                out[-1] = out[-1].rstrip() + '\n'
+            out.append(indent_str * indent + '<err>\n')
+            indent += 1
+        elif part == '</err>':
+            if out and not out[-1].endswith('\n'):
+                out[-1] = out[-1].rstrip() + '\n'
+            indent -= 1
+            out.append(indent_str * indent + '</err>\n')
+        elif part.startswith('<obs'):
+            tag = part.replace('\n', ' ')
+            tag = re.sub(r'\s+', ' ', tag)
+            if out and not out[-1].endswith('\n'):
+                out[-1] = out[-1].rstrip() + '\n'
+            out.append(indent_str * indent + tag + '\n')
+        elif part == '</obs>':
+            out.append('</obs>')
+        else:
+            for line in part.splitlines(True):
+                if line.strip():
+                    out.append(indent_str * indent + line)
+                else:
+                    out.append(line)
+    formatted = ''.join(out)
+    return re.sub(r'[ \t]+(?=\n)', '', formatted)
 
 
 def main():
@@ -129,8 +177,9 @@ def main():
 
     clean_text = clean_html_escapes(mid_text)
     final_text = finalize_markers(clean_text)
+    formatted = format_tags(final_text)
     out_path = base.with_suffix('.qmd')
-    out_path.write_text(final_text)
+    out_path.write_text(formatted)
     print(f"Wrote {out_path}")
 
 
