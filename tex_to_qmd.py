@@ -8,13 +8,30 @@ from pathlib import Path
 
 def preprocess_latex(src: str) -> str:
     """Convert custom environments and observation macros before pandoc."""
-    # replace python environment with verbatim + markers
-    src = re.sub(r"\\begin{python}.*?\n", r"\\begin{verbatim}\n%%PYTHON_START%%\n", src)
-    src = re.sub(r"\\end{python}", r"%%PYTHON_END%%\n\\end{verbatim}", src)
 
-    # convert err environment so pandoc will parse inside
-    src = src.replace("\\begin{err}", '<div class="err">')
-    src = src.replace("\\end{err}", '</div>')
+    def repl_python(m: re.Match) -> str:
+        """Preserve python blocks exactly using markers."""
+        code = m.group(1)
+        return ("\\begin{verbatim}\n%%PYTHON_START%%\n" + code +
+                "%%PYTHON_END%%\n\\end{verbatim}")
+
+    # replace python environment with verbatim + markers without touching
+    # the whitespace contained in the block
+    src = re.sub(
+        r"\\begin{python}(?:\[[^\]]*\])?\n(.*?)\\end{python}",
+        repl_python,
+        src,
+        flags=re.S,
+    )
+
+    # convert err environment so pandoc will parse inside while preserving
+    # the whitespace exactly
+    src = re.sub(
+        r"\\begin{err}\n?(.*?)\\end{err}",
+        lambda m: f"<err>{m.group(1)}</err>",
+        src,
+        flags=re.S,
+    )
 
     # handle \o[...]{} observations
     out = []
@@ -65,21 +82,20 @@ def clean_html_escapes(text: str) -> str:
 def finalize_markers(text: str) -> str:
     lines = []
     in_py = False
-    for line in text.splitlines():
+    for line in text.splitlines(keepends=True):
         if re.match(r'^\s*%%PYTHON_START%%', line):
-            lines.append('```{python}')
+            lines.append('```{python}\n')
             in_py = True
             continue
         if re.match(r'^\s*%%PYTHON_END%%', line):
-            lines.append('```')
+            lines.append('```\n')
             in_py = False
             continue
         if in_py and line.startswith('    '):
             lines.append(line[4:])
         else:
             lines.append(line)
-    content = "\n".join(lines)
-    return content.replace('<div class="err">', '<err>').replace('</div>', '</err>')
+    return ''.join(lines)
 
 
 def main():
