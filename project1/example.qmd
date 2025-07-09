@@ -20,12 +20,11 @@ Here's an example plot!
     then I do some stuff to fix the problems
     <obs time="7/8/25 20:08" author="JF">here are notes about the specific solution</obs>
 </err>
-
 <obs time="11/27 16:51">Make sure there is no space betwen the err and obs here!!</obs>
 <obs time="2/15/24 11:55">another observation</obs>
 
 <err>
-     Make sure that this line lines up with the following lines.
+    Make sure that this line lines up with the following lines.
 
     Another step for debugging.
 

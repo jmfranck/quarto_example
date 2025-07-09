@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""this script has been entirely vibe-coded based on the tex example included in the repo!"""
 import re
 import sys
 import subprocess
@@ -160,10 +161,13 @@ def format_observations(text: str) -> str:
 def format_tags(text: str, indent_str: str = '    ') -> str:
     """Format <err> blocks with indentation and tidy <obs> tags."""
     text = format_observations(text)
+    # normalize whitespace around err tags
+    text = re.sub(r'<err>[ \t]*\n+', '<err>\n', text)
+    text = re.sub(r'<err>[ \t]+', '<err>\n', text)
+    text = re.sub(r'</err>[ \t]+', '</err>', text)
     # ensure opening obs tags start on a new line without collapsing blank lines
     text = re.sub(r'(\n+)[ \t]*(<obs)', r'\1\2', text)
     text = re.sub(r'(?<!^)(?<!\n)(<obs)', r'\n\1', text)
-    text = re.sub(r'<err>[ \t]*\n+', '<err>\n', text)
     # ensure a newline after closing obs tags but keep extra blank lines
     text = re.sub(r'</obs>[ \t]+', '</obs>', text)
     text = re.sub(r'</obs>(?!\n)', '</obs>\n', text)
