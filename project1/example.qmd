@@ -15,9 +15,15 @@ Here's an example plot!
 </err>
 
 ```{python}
-from pylab import *
-from pyspecdata import *
-with figlist_var() as fl:
-    fl.next('this is a plot')
-    fl.plot(r_[0:10])
+%load_ext pyspecdata.ipy
+from pyspecdata import nddata
+from numpy import r_
+x = nddata(r_[0:10],'x')
+x
+```
+
+now show the square
+
+```{python}
+x**2
 ```

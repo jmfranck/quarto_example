@@ -88,7 +88,7 @@ function Para(para)
         pandoc.Span({pandoc.Str('DEBUG:')}, pandoc.Attr('', {}, {style = 'color:grey;'}))
       })
       local body = pandoc.Para(inner)
-      local div = pandoc.Div({header, body}, pandoc.Attr('', {}, {style = 'margin:10px; border:1px solid grey;'}))
+      local div = pandoc.Div({header, pandoc.Div({body}, pandoc.Attr('', {}, {style = 'margin:10px; border:0px;'}))}, pandoc.Attr('', {}, {style = 'margin:0px; border:1px solid grey; padding:0px;'}))
       out_blocks:insert(div)
     else
       buf:insert(el)
