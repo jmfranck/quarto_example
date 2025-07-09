@@ -60,3 +60,48 @@ function Inlines(inls)
   return out
 end
 
+-- Convert <err>...</err> segments within a paragraph into a styled Div
+function Para(para)
+  local out_blocks = pandoc.List{}
+  local buf = pandoc.List{}
+  local i = 1
+  local inlines = para.content
+  while i <= #inlines do
+    local el = inlines[i]
+    if el.t == 'RawInline' and el.format == 'html' and el.text == '<err>' then
+      if #buf > 0 then
+        out_blocks:insert(pandoc.Para(buf))
+        buf = pandoc.List{}
+      end
+      local inner = pandoc.List{}
+      i = i + 1
+      while i <= #inlines do
+        local cur = inlines[i]
+        if cur.t == 'RawInline' and cur.format == 'html' and cur.text == '</err>' then
+          break
+        else
+          inner:insert(cur)
+        end
+        i = i + 1
+      end
+      local header = pandoc.Para({
+        pandoc.Span({pandoc.Str('DEBUG:')}, pandoc.Attr('', {}, {style = 'color:grey;'}))
+      })
+      local body = pandoc.Para(inner)
+      local div = pandoc.Div({header, body}, pandoc.Attr('', {}, {style = 'margin:10px; border:1px solid grey;'}))
+      out_blocks:insert(div)
+    else
+      buf:insert(el)
+    end
+    i = i + 1
+  end
+  if #out_blocks == 0 then
+    return nil
+  else
+    if #buf > 0 then
+      out_blocks:insert(pandoc.Para(buf))
+    end
+    return out_blocks
+  end
+end
+
