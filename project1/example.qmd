@@ -17,11 +17,12 @@ Here's an example plot!
 <obs time="7/8/25 20:08" author="JF">this is what I observe about the plot there is no space before the debug block</obs>
 <err>
     <obs time="7/8/25 20:06" author="JF">I had some problems making the plot</obs>
-    then I do some stuff to fix the problems
+    then I do some stuff to fix the problems *in italics!*
     <obs time="7/8/25 20:08" author="JF">here are notes about the specific solution</obs>
 </err>
 <obs time="11/27 16:51">Make sure there is no space betwen the err and obs here!!</obs>
 <obs time="2/15/24 11:55">another observation</obs>
+ø$\checkmark$
 
 <err>
     Make sure that this line lines up with the following lines.
