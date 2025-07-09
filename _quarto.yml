@@ -3,16 +3,16 @@ project:
   type: website
   render:
     - notebook250708.qmd
-    - project1/subproject1/tasks.qmd
+    - project1/index.qmd
 
 website:
   sidebar:
     contents:
       - notebook250708.qmd
-      - project1/subproject1/tasks.qmd
+      - project1/index.qmd
 
 execute:
-  cache: true
+  cache: false
   jupyter: python3
 
 format:
@@ -21,5 +21,6 @@ format:
     toc-depth: 4
     toc-location: right
     extensions: [markdown+raw_html]
+    title-block-style: none
 
 filters: [obs.lua]

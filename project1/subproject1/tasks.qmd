@@ -1,11 +1,3 @@
----
-title: "Project1 SubProject1 Tasks"
----
-
-# Project1
-
-## SubProject1
-
 ### Question: Improve Data Processing
 
 #### Task 1 {#sec:task1}
