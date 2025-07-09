@@ -109,9 +109,40 @@ def finalize_markers(text: str) -> str:
     return ''.join(lines)
 
 
+def format_observations(text: str, width: int = 80) -> str:
+    """Wrap observation tags so opening/closing are on the same line."""
+
+    obs_re = re.compile(r'(<obs[^>]*>)(.*?)(</obs>)', flags=re.S)
+
+    def repl(match: re.Match) -> str:
+        open_tag = re.sub(r'\s+', ' ', match.group(1).strip())
+        body = re.sub(r'\s+', ' ', match.group(2).strip())
+        words = body.split()
+        prefix = open_tag
+        lines = []
+        line = prefix
+        avail = width - len('</obs>')
+        for w in words:
+            if len(line) + 1 + len(w) > avail:
+                lines.append(line)
+                line = ' ' * len(prefix) + w
+            else:
+                if line == prefix:
+                    line += ' ' + w
+                else:
+                    line += ' ' + w
+        lines.append(line + '</obs>')
+        return '\n'.join(lines)
+
+    return obs_re.sub(repl, text)
+
+
 def format_tags(text: str, indent_str: str = '    ') -> str:
-    """Ensure obs/err tags are on their own lines and indent err blocks."""
-    pattern = re.compile(r'(<err>|</err>|<obs[^>]*>|</obs>)')
+    """Format <err> blocks with indentation and wrap <obs> tags."""
+    text = format_observations(text)
+    # ensure exactly one newline after closing obs tags
+    text = re.sub(r'</obs>\s*', '</obs>\n', text)
+    pattern = re.compile(r'(<err>|</err>)')
     parts = pattern.split(text)
     out = []
     indent = 0
@@ -128,18 +159,11 @@ def format_tags(text: str, indent_str: str = '    ') -> str:
                 out[-1] = out[-1].rstrip() + '\n'
             indent -= 1
             out.append(indent_str * indent + '</err>\n')
-        elif part.startswith('<obs'):
-            tag = part.replace('\n', ' ')
-            tag = re.sub(r'\s+', ' ', tag)
-            if out and not out[-1].endswith('\n'):
-                out[-1] = out[-1].rstrip() + '\n'
-            out.append(indent_str * indent + tag + '\n')
-        elif part == '</obs>':
-            out.append('</obs>')
         else:
-            for line in part.splitlines(True):
+            lines = part.splitlines(True)
+            for line in lines:
                 if line.strip():
-                    out.append(indent_str * indent + line)
+                    out.append(indent_str * indent + line.lstrip())
                 else:
                     out.append(line)
     formatted = ''.join(out)
