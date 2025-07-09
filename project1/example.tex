@@ -30,16 +30,17 @@ Here's an example plot!
 \par
 \begin{python}[on]
 from pylab import *
-from pyspecdata import *
-with figlist_var() as fl:
-    fl.next('this is a plot')
-    fl.plot(r_[0:10])
+plot(r_[0:10])
 \end{python}
 \par
 \par
 \begin{python}[on]
+%reset -f
 from pylab import *
-plot(r_[0:10])
+from pyspecdata import *
+with figlist_var() as fl:
+    fl.next('this is a plot')
+    fl.plot(r_[0:10])
 \end{python}
 \par
 continue
