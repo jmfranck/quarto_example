@@ -172,7 +172,7 @@ def format_tags(text: str, indent_str: str = '    ') -> str:
             lines = part.splitlines(True)
             for line in lines:
                 if line.strip():
-                    out.append(indent_str * indent + line.lstrip())
+                    out.append(indent_str * indent + line)
                 else:
                     out.append(line)
             prev_tag = None
