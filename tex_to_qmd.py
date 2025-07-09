@@ -28,14 +28,37 @@ def preprocess_latex(src: str) -> str:
     def repl_python(m: re.Match) -> str:
         """Preserve python blocks exactly using markers."""
         code = m.group(1)
-        return ("\\begin{verbatim}\n%%PYTHON_START%%\n" + code +
-                "%%PYTHON_END%%\n\\end{verbatim}")
+        return (
+            "\\begin{verbatim}\n%%PYTHON_START%%\n"
+            + code
+            + "%%PYTHON_END%%\n\\end{verbatim}"
+        )
+
+    def repl_verbatim(m: re.Match) -> str:
+        """Mark generic verbatim blocks for fenced conversion."""
+        newline = m.group(1)
+        body = m.group(2)
+        if "%%PYTHON_START%%" in body:
+            return m.group(0)
+        return (
+            f"\\begin{{verbatim}}{newline}%%VERBATIM_START%%\n"
+            + body
+            + "%%VERBATIM_END%%\n\\end{verbatim}"
+        )
 
     # replace python environment with verbatim + markers without touching
     # the whitespace contained in the block
     src = re.sub(
         r"\\begin{python}(?:\[[^\]]*\])?\n(.*?)\\end{python}",
         repl_python,
+        src,
+        flags=re.S,
+    )
+
+    # mark standard verbatim blocks so they convert to fenced code later
+    src = re.sub(
+        r"\\begin{verbatim}(\n?)(.*?)\\end{verbatim}",
+        repl_verbatim,
         src,
         flags=re.S,
     )
@@ -93,6 +116,7 @@ def clean_html_escapes(text: str) -> str:
 def finalize_markers(text: str) -> str:
     lines = []
     in_py = False
+    in_verb = False
     for line in text.splitlines(keepends=True):
         if re.match(r'^\s*%%PYTHON_START%%', line):
             lines.append('```{python}\n')
@@ -102,7 +126,15 @@ def finalize_markers(text: str) -> str:
             lines.append('```\n')
             in_py = False
             continue
-        if in_py and line.startswith('    '):
+        if re.match(r'^\s*%%VERBATIM_START%%', line):
+            lines.append('```\n')
+            in_verb = True
+            continue
+        if re.match(r'^\s*%%VERBATIM_END%%', line):
+            lines.append('```\n')
+            in_verb = False
+            continue
+        if (in_py or in_verb) and line.startswith('    '):
             lines.append(line[4:])
         else:
             lines.append(line)
@@ -128,12 +160,13 @@ def format_observations(text: str) -> str:
 def format_tags(text: str, indent_str: str = '    ') -> str:
     """Format <err> blocks with indentation and tidy <obs> tags."""
     text = format_observations(text)
-    # ensure opening obs tags start on a new line
-    text = re.sub(r'\n[ \t]*(<obs)', r'\n\1', text)
+    # ensure opening obs tags start on a new line without collapsing blank lines
+    text = re.sub(r'(\n+)[ \t]*(<obs)', r'\1\2', text)
     text = re.sub(r'(?<!^)(?<!\n)(<obs)', r'\n\1', text)
     text = re.sub(r'<err>[ \t]*\n+', '<err>\n', text)
-    # ensure exactly one newline after closing obs tags
-    text = re.sub(r'</obs>\s*', '</obs>\n', text)
+    # ensure a newline after closing obs tags but keep extra blank lines
+    text = re.sub(r'</obs>[ \t]+', '</obs>', text)
+    text = re.sub(r'</obs>(?!\n)', '</obs>\n', text)
     pattern = re.compile(r'(<err>|</err>)')
     parts = pattern.split(text)
     out = []
