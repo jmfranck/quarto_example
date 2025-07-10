@@ -22,6 +22,7 @@ def load_rendered_files():
 
 
 def build_include_map(render_files):
+    """Map each included file to the files that include it."""
     included_by = {}
     for root_file in render_files:
         root_dir = Path(root_file).parent
@@ -96,48 +97,100 @@ def replace_refs(path, anchors):
 
 
 
-def render_fragment(src: Path, anchors, cache, root_dir=None) -> str:
-    """Render src to HTML fragment with includes expanded."""
-    if root_dir is None:
-        root_dir = src.parent
-    if src in cache:
-        return cache[src]
 
-    text = replace_refs_text(src.read_text(), anchors)
 
-    def repl(match: re.Match) -> str:
-        target = (root_dir / match.group(2)).resolve()
-        return render_fragment(target, anchors, cache, root_dir)
 
-    text = include_pattern.sub(repl, text)
+BUILD_DIR = Path('_build')
+BODY_TEMPLATE = Path('body-only.html').resolve()
 
-    dest = Path('_build') / src
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_text(text)
 
-    html_path = dest.with_suffix('.html')
-    subprocess.run(
-        ['quarto', 'render', dest.name, '--output', html_path.name, '--no-execute'],
-        check=True,
-        cwd=dest.parent
-    )
-    html = html_path.read_text()
-    m = re.search(r'<body[^>]*>(.*)</body>', html, flags=re.S)
-    if m:
-        html = m.group(1)
-        html_path.write_text(html)
-    cache[src] = html
-    return html
+def build_include_tree(render_files):
+    """Return mapping of each file to the files it includes and their root dirs."""
+    tree = {}
+    visited = set()
+    stack = [Path(f).resolve() for f in render_files]
+    root = Path('.').resolve()
+    root_dirs = {Path(f).resolve(): Path(f).parent.resolve() for f in render_files}
+    while stack:
+        current = stack.pop()
+        if current in visited or not current.exists():
+            continue
+        visited.add(current)
+        root_dir = root_dirs.get(current, root_dirs.get(Path(current), current.parent))
+        includes = []
+        text = current.read_text()
+        for _kind, inc in include_pattern.findall(text):
+            target = (root_dir / inc).resolve()
+            try:
+                rel = target.relative_to(root).as_posix()
+            except ValueError:
+                rel = target.as_posix()
+            includes.append(rel)
+            stack.append(target)
+            root_dirs[target] = root_dir
+        try:
+            key = current.relative_to(root).as_posix()
+        except ValueError:
+            key = current.as_posix()
+        tree[key] = includes
+    # convert keys to posix strings
+    root_dirs_str = {p.relative_to(root).as_posix(): d for p, d in root_dirs.items() if p.exists()}
+    return tree, root_dirs_str
 
+
+def all_files(render_files, tree):
+    files = set(render_files)
+    for src, incs in tree.items():
+        files.add(src)
+        files.update(incs)
+    return files
+
+
+def mirror_and_modify(files, anchors, roots):
+    project_root = Path('.').resolve()
+    for file in files:
+        src = Path(file)
+        dest = BUILD_DIR / file
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        text = src.read_text()
+        text = replace_refs_text(text, anchors)
+
+        root_dir = roots.get(file, src.parent)
+
+        def repl(match: re.Match) -> str:
+            kind, inc = match.groups()
+            target_src = (root_dir / inc).resolve()
+            target_rel = target_src.relative_to(project_root)
+            html_path = (BUILD_DIR / target_rel).with_suffix('.html')
+            inc_path = os.path.relpath(html_path, dest.parent)
+            return f"{{{{< {kind} {inc_path} >}}}}"
+
+        text = include_pattern.sub(repl, text)
+        dest.write_text(text)
+
+
+def render_file(dest: Path, fragment: bool):
+    args = ['quarto', 'render', dest.name, '--no-execute']
+    if fragment:
+        args += ['--to', 'html', '--template', str(BODY_TEMPLATE)]
+    args += ['--output', dest.with_suffix('.html').name]
+    subprocess.run(args, check=True, cwd=dest.parent)
 
 
 def build_all():
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
     render_files = load_rendered_files()
     include_map = build_include_map(render_files)
+    tree, roots = build_include_tree(render_files)
     anchors = collect_anchors(render_files, include_map)
-    cache = {}
-    for src in render_files:
-        render_fragment(Path(src), anchors, cache)
+
+    files = all_files(render_files, tree)
+    mirror_and_modify(files, anchors, roots)
+    for f in files:
+        if f not in render_files:
+            render_file(BUILD_DIR / f, True)
+    for f in render_files:
+        render_file(BUILD_DIR / f, False)
 
 
 class ChangeHandler(FileSystemEventHandler):
