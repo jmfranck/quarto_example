@@ -183,7 +183,8 @@ def mirror_and_modify(files, anchors, roots):
             target_rel = target_src.relative_to(project_root)
             html_path = (BUILD_DIR / target_rel).with_suffix('.html')
             inc_path = os.path.relpath(html_path, dest.parent)
-            return f"{{{{< {kind} {inc_path} >}}}}"
+            # use a comment placeholder that will be replaced post-render
+            return f"<!-- {kind.upper()} {inc_path} -->"
 
         text = include_pattern.sub(repl, text)
         dest.write_text(text)
@@ -208,6 +209,24 @@ def render_file(src: Path, dest: Path, fragment: bool):
     subprocess.run(args, check=True, cwd=dest.parent)
 
 
+def postprocess_html(html_path: Path):
+    """Replace placeholders in ``html_path`` with referenced HTML bodies."""
+    text = html_path.read_text()
+    def repl(match: re.Match) -> str:
+        kind, path = match.group(1).lower(), match.group(2)
+        target = (html_path.parent / path).resolve()
+        if not target.exists():
+            return ''
+        body = target.read_text()
+        m = re.search(r'<body[^>]*>(.*)</body>', body, flags=re.DOTALL|re.IGNORECASE)
+        if m:
+            body = m.group(1)
+        return body
+
+    new_text = re.sub(r'<!--\s*(INCLUDE|EMBED)\s+([^>]+)\s*-->', repl, text)
+    html_path.write_text(new_text)
+
+
 def build_all():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     # copy project configuration without the render list so individual renders
@@ -229,6 +248,7 @@ def build_all():
     for f in order:
         fragment = f not in render_files
         render_file(Path(f), BUILD_DIR / f, fragment)
+        postprocess_html((BUILD_DIR / f).with_suffix('.html'))
 
 
 class BrowserReloader:
