@@ -257,6 +257,7 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
         "--embed-resources",
         "--lua-filter",
         os.path.relpath(BUILD_DIR / 'obs.lua', dest.parent),
+        "--mathjax=https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
         "-o",
         dest.with_suffix(".html").name,
     ]

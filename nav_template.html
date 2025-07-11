@@ -1,8 +1,14 @@
 <style>
+  body { margin-left:20px; margin-right:20px; max-width:60em; }
   #on-this-page {position:fixed; right:0; top:100px; width:250px; max-height:70vh;
     overflow:auto; background:rgba(248,249,250,0.5); padding:10px;
-    border-left:3px solid #0d6efd; font-size:90%;}
-  #on-this-page a.active {font-weight:bold; text-decoration:underline;}
+    border-left:3px solid #0d6efd; font-family:"Helvetica Neue", Arial, sans-serif;
+    font-size:0.9em;}
+  #on-this-page ul { list-style:none; padding-left:15px; margin:0; }
+  #on-this-page li { margin:2px 0; }
+  #on-this-page a { text-decoration:none; color:inherit; cursor:pointer; }
+  #on-this-page a.active {font-weight:bold; background:rgba(13,110,253,0.15);
+    border-radius:4px; padding:2px 4px;}
 </style>
 <div id="on-this-page">
   <strong>On this page</strong>
@@ -23,15 +29,47 @@
 document.addEventListener('DOMContentLoaded', function() {
   const menu = document.querySelector('#on-this-page');
   const links = menu.querySelectorAll('a');
-  const sections = Array.from(links, l => document.getElementById(l.getAttribute('href').slice(1))).filter(Boolean);
+
+  // collapse/expand
+  menu.querySelectorAll('li').forEach(li => {
+    const sub = li.querySelector('ul');
+    if(sub){
+      sub.style.display = 'none';
+      li.firstElementChild.addEventListener('click', evt => {
+        evt.preventDefault();
+        sub.style.display = sub.style.display === 'block' ? 'none' : 'block';
+        location.hash = li.firstElementChild.getAttribute('href');
+      });
+    }
+  });
+
+  function activate(id){
+    links.forEach(l => {
+      const match = l.getAttribute('href').slice(1) === id;
+      l.classList.toggle('active', match);
+      if(match){
+        let p = l.parentElement;
+        while(p && p !== menu){
+          if(p.tagName.toLowerCase() === 'ul'){
+            p.style.display = 'block';
+          }
+          p = p.parentElement;
+        }
+      }
+    });
+  }
+
   const opts = {rootMargin: '0px 0px -80% 0px'};
   const obs = new IntersectionObserver(entries => {
     entries.forEach(e => {
       if(e.isIntersecting){
-        links.forEach(l => l.classList.toggle('active', l.getAttribute('href').slice(1) === e.target.id));
+        // collapse all sublists first
+        menu.querySelectorAll('ul').forEach(u => { if(u !== menu.querySelector('ul')) u.style.display = 'none'; });
+        activate(e.target.id);
       }
     });
   }, opts);
+  const sections = Array.from(links, l => document.getElementById(l.getAttribute('href').slice(1))).filter(Boolean);
   sections.forEach(s => obs.observe(s));
 });
 </script>
