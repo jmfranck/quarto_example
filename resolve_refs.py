@@ -193,18 +193,30 @@ PROJECT_ROOT = Path('.').resolve()
 
 
 def render_file(src: Path, dest: Path, fragment: bool):
-    args = ['quarto', 'render', dest.name]
-    args += ['--execute-dir', os.path.relpath(src.parent, dest.parent)]
-    args += ['--output-dir', '.']
+    """Render ``src`` to ``dest`` using Quarto with embedded resources."""
+
+    args = [
+        "quarto",
+        "render",
+        dest.name,
+    ]
+    if not fragment:
+        args.append("--embed-resources")
     if fragment:
-        args += ['--to', 'html', '--template', str(BODY_TEMPLATE)]
-    args += ['--output', dest.with_suffix('.html').name]
+        template_path = os.path.relpath(BODY_TEMPLATE, dest.parent)
+        args += ["--to", "html", "--template", template_path]
+    args += ["--output", dest.with_suffix(".html").name]
     subprocess.run(args, check=True, cwd=dest.parent)
 
 
 def build_all():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy2('_quarto.yml', BUILD_DIR / '_quarto.yml')
+    # copy project configuration without the render list so individual renders
+    # don't attempt to build the entire project
+    cfg = yaml.safe_load(Path('_quarto.yml').read_text())
+    if 'project' in cfg and 'render' in cfg['project']:
+        cfg['project']['render'] = []
+    (BUILD_DIR / '_quarto.yml').write_text(yaml.safe_dump(cfg))
     if Path('obs.lua').exists():
         shutil.copy2('obs.lua', BUILD_DIR / 'obs.lua')
     render_files = load_rendered_files()
