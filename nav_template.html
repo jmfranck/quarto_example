@@ -1,0 +1,15 @@
+<div id="on-this-page" style="position: fixed; right: 0; top: 100px; width: 250px; max-height: 70vh; overflow: auto; background:#f8f9fa; padding: 10px; border-left:1px solid #ddd; font-size:90%;">
+  <strong>On this page</strong>
+  {% macro render(items) -%}
+  <ul>
+  {%- for item in items %}
+    <li><a href="#{{ item.id }}">{{ item.text }}</a>
+    {%- if item.children %}
+      {{ render(item.children) }}
+    {%- endif %}
+    </li>
+  {%- endfor %}
+  </ul>
+  {%- endmacro %}
+  {{ render(items) }}
+</div>

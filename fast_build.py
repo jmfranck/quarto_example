@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""Minimal build script using Pandoc instead of Quarto."""
+
+import hashlib
 import os
 import re
 import subprocess
@@ -12,8 +15,11 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from selenium import webdriver
 import selenium
+from jinja2 import Environment, FileSystemLoader
 
 include_pattern = re.compile(r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}")
+# Python code block pattern
+code_pattern = re.compile(r"```\{python[^}]*\}\n(.*?)```", re.DOTALL)
 
 # Collect anchor definitions {#sec:id}, {#fig:id}, {#tab:id}
 anchor_pattern = re.compile(r"\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}")
@@ -22,6 +28,23 @@ heading_pattern = re.compile(r"^(#+)\s+(.*?)\s*\{#(sec|fig|tab):([A-Za-z0-9_-]+)
 def load_rendered_files():
     cfg = yaml.safe_load(Path('_quarto.yml').read_text())
     return list(cfg.get('project', {}).get('render', []))
+
+
+def load_bibliography_csl():
+    cfg = yaml.safe_load(Path('_quarto.yml').read_text())
+    bib = None
+    csl = None
+    if 'bibliography' in cfg:
+        bib = cfg['bibliography']
+    if 'csl' in cfg:
+        csl = cfg['csl']
+    fmt = cfg.get('format', {})
+    if isinstance(fmt, dict):
+        for v in fmt.values():
+            if isinstance(v, dict):
+                bib = bib or v.get('bibliography')
+                csl = csl or v.get('csl')
+    return bib, csl
 
 
 def build_include_map(render_files):
@@ -109,6 +132,7 @@ def replace_refs(path, anchors):
 
 BUILD_DIR = Path('_build')
 BODY_TEMPLATE = Path('body-only.html').resolve()
+NAV_TEMPLATE = Path('nav_template.html').resolve()
 
 
 def build_include_tree(render_files):
@@ -128,13 +152,15 @@ def build_include_tree(render_files):
         text = current.read_text()
         for _kind, inc in include_pattern.findall(text):
             target = (root_dir / inc).resolve()
+            if not target.exists():
+                continue
             try:
                 rel = target.relative_to(root).as_posix()
             except ValueError:
                 rel = target.as_posix()
             includes.append(rel)
             stack.append(target)
-            root_dirs[target] = root_dir
+            root_dirs.setdefault(target, target.parent)
         try:
             key = current.relative_to(root).as_posix()
         except ValueError:
@@ -146,10 +172,13 @@ def build_include_tree(render_files):
 
 
 def all_files(render_files, tree):
-    files = set(render_files)
+    files = {f for f in render_files if Path(f).exists()}
     for src, incs in tree.items():
-        files.add(src)
-        files.update(incs)
+        if Path(src).exists():
+            files.add(src)
+        for inc in incs:
+            if Path(inc).exists():
+                files.add(inc)
     return files
 
 
@@ -191,29 +220,79 @@ def mirror_and_modify(files, anchors, roots):
             return f"<div data-{kind.lower()}=\"{inc_path}\"></div>"
 
         text = include_pattern.sub(repl, text)
+
+        idx = 0
+        def repl_code(match: re.Match) -> str:
+            nonlocal idx
+            idx += 1
+            code = match.group(1)
+            md5 = hashlib.md5(code.encode()).hexdigest()
+            src_rel = str(src)
+            return f"<div data-script=\"{src_rel}\" data-index=\"{idx}\" data-md5=\"{md5}\"></div>"
+
+        text = code_pattern.sub(repl_code, text)
         dest.write_text(text)
 
 
 PROJECT_ROOT = Path('.').resolve()
 
 
-def render_file(src: Path, dest: Path, fragment: bool):
-    """Render ``src`` to ``dest`` using Quarto with embedded resources."""
+def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=None):
+    """Render ``src`` to ``dest`` using Pandoc with embedded resources."""
 
     args = [
-        "quarto",
-        "render",
-        dest.name,
+        "pandoc",
+        src.name,
+        "--from",
+        "markdown+raw_html",
+        "--standalone",
+        "--embed-resources",
+        "--lua-filter",
+        os.path.relpath(BUILD_DIR / 'obs.lua', dest.parent),
+        "-o",
+        dest.with_suffix(".html").name,
     ]
     if fragment:
-        args.append("--embed-resources")
         template_path = os.path.relpath(BODY_TEMPLATE, dest.parent)
-        args += ["--to", "html", "--template", template_path]
-    args += ["--output", dest.with_suffix(".html").name]
+        args += ["--template", template_path]
+    if bibliography:
+        args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
+    if csl:
+        args += ["--csl", os.path.relpath(csl, dest.parent)]
     subprocess.run(args, check=True, cwd=dest.parent)
 
 
 from lxml import html as lxml_html
+
+
+def add_navigation(html_path: Path):
+    """Insert navigation menu built from headings using a Jinja template."""
+    root = lxml_html.fromstring(html_path.read_text())
+    body = root.xpath('//body')
+    if not body:
+        return
+    headings = root.xpath('//h1|//h2|//h3|//h4|//h5|//h6')
+    items = []
+    stack = []
+    for h in headings:
+        level = int(h.tag[1])
+        text = ''.join(h.itertext()).strip()
+        ident = h.get('id')
+        node = {'level': level, 'text': text, 'id': ident, 'children': []}
+        while stack and stack[-1]['level'] >= level:
+            stack.pop()
+        if stack:
+            stack[-1]['children'].append(node)
+        else:
+            items.append(node)
+        stack.append(node)
+    if items:
+        env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
+        tmpl = env.get_template(NAV_TEMPLATE.name)
+        fragment = lxml_html.fromstring(tmpl.render(items=items))
+        body[0].insert(0, fragment)
+    html_path.write_text(lxml_html.tostring(root, encoding='unicode'))
+
 
 def postprocess_html(html_path: Path):
     """Replace placeholder nodes with referenced HTML bodies."""
@@ -261,6 +340,7 @@ def build_all():
     if Path('obs.lua').exists():
         shutil.copy2('obs.lua', BUILD_DIR / 'obs.lua')
     render_files = load_rendered_files()
+    bibliography, csl = load_bibliography_csl()
     include_map = build_include_map(render_files)
     tree, roots = build_include_tree(render_files)
     anchors = collect_anchors(render_files, include_map)
@@ -270,8 +350,11 @@ def build_all():
     order = build_order(render_files, tree)
     for f in order:
         fragment = f not in render_files
-        render_file(Path(f), BUILD_DIR / f, fragment)
-        postprocess_html((BUILD_DIR / f).with_suffix('.html'))
+        render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl)
+        html_file = (BUILD_DIR / f).with_suffix('.html')
+        postprocess_html(html_file)
+        if f in render_files:
+            add_navigation(html_file)
 
 
 class BrowserReloader:
@@ -343,7 +426,7 @@ def watch_and_serve():
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Resolve refs and build site")
+    parser = argparse.ArgumentParser(description="Build site using Pandoc")
     parser.add_argument('--watch', action='store_true', help='Watch files and serve site')
     args = parser.parse_args()
     if args.watch:
