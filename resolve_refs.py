@@ -200,9 +200,8 @@ def render_file(src: Path, dest: Path, fragment: bool):
         "render",
         dest.name,
     ]
-    if not fragment:
-        args.append("--embed-resources")
     if fragment:
+        args.append("--embed-resources")
         template_path = os.path.relpath(BODY_TEMPLATE, dest.parent)
         args += ["--to", "html", "--template", template_path]
     args += ["--output", dest.with_suffix(".html").name]
