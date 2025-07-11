@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
+import shutil
 import yaml
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -166,7 +167,7 @@ def build_order(render_files, tree):
 
 
 def mirror_and_modify(files, anchors, roots):
-    project_root = Path('.').resolve()
+    project_root = PROJECT_ROOT
     for file in files:
         src = Path(file)
         dest = BUILD_DIR / file
@@ -188,8 +189,13 @@ def mirror_and_modify(files, anchors, roots):
         dest.write_text(text)
 
 
-def render_file(dest: Path, fragment: bool):
+PROJECT_ROOT = Path('.').resolve()
+
+
+def render_file(src: Path, dest: Path, fragment: bool):
     args = ['quarto', 'render', dest.name]
+    args += ['--execute-dir', os.path.relpath(src.parent, dest.parent)]
+    args += ['--output-dir', '.']
     if fragment:
         args += ['--to', 'html', '--template', str(BODY_TEMPLATE)]
     args += ['--output', dest.with_suffix('.html').name]
@@ -198,6 +204,9 @@ def render_file(dest: Path, fragment: bool):
 
 def build_all():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2('_quarto.yml', BUILD_DIR / '_quarto.yml')
+    if Path('obs.lua').exists():
+        shutil.copy2('obs.lua', BUILD_DIR / 'obs.lua')
     render_files = load_rendered_files()
     include_map = build_include_map(render_files)
     tree, roots = build_include_tree(render_files)
@@ -208,7 +217,7 @@ def build_all():
     order = build_order(render_files, tree)
     for f in order:
         fragment = f not in render_files
-        render_file(BUILD_DIR / f, fragment)
+        render_file(Path(f), BUILD_DIR / f, fragment)
 
 
 class BrowserReloader:
