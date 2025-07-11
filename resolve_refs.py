@@ -64,6 +64,8 @@ def resolve_render_file(file, included_by, render_files):
 def collect_anchors(render_files, included_by):
     anchors = {}
     for path in Path('.').rglob('*.qmd'):
+        if BUILD_DIR in path.parents:
+            continue
         lines = path.read_text().splitlines()
         for line in lines:
             for m in anchor_pattern.finditer(line):
@@ -79,20 +81,22 @@ def collect_anchors(render_files, included_by):
 
 ref_pattern = re.compile(r"@(sec|fig|tab):([A-Za-z0-9_-]+)")
 
-def replace_refs_text(text, anchors):
+def replace_refs_text(text, anchors, dest_dir: Path):
     def repl(match):
         kind, ident = match.group(1), match.group(2)
         key = f"{kind}:{ident}"
         if key in anchors:
             file, label = anchors[key]
-            link = f"{file.replace('.qmd', '.html')}#{key}"
+            html_path = BUILD_DIR / file.replace('.qmd', '.html')
+            rel = os.path.relpath(html_path, dest_dir)
+            link = f"{rel}#{key}"
             return f"[{label}]({link})"
         return match.group(0)
     return ref_pattern.sub(repl, text)
 
 def replace_refs(path, anchors):
     content = path.read_text()
-    new_content = replace_refs_text(content, anchors)
+    new_content = replace_refs_text(content, anchors, path.parent)
     if new_content != content:
         path.write_text(new_content)
         return True
@@ -173,7 +177,7 @@ def mirror_and_modify(files, anchors, roots):
         dest = BUILD_DIR / file
         dest.parent.mkdir(parents=True, exist_ok=True)
         text = src.read_text()
-        text = replace_refs_text(text, anchors)
+        text = replace_refs_text(text, anchors, dest.parent)
 
         root_dir = roots.get(file, src.parent)
 
@@ -232,6 +236,17 @@ def postprocess_html(html_path: Path):
                 parent.insert(idx, elem)
         else:
             node.getparent().remove(node)
+    # add MathJax if math is present
+    has_math = bool(root.xpath('//*[@class="math inline" or @class="math display"]'))
+    has_script = bool(root.xpath('//script[contains(@src, "MathJax")]'))
+    if has_math and not has_script:
+        head = root.xpath('//head')
+        if head:
+            script = lxml_html.fragment_fromstring(
+                '<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>',
+                create_parent=False,
+            )
+            head[0].append(script)
     html_path.write_text(lxml_html.tostring(root, encoding='unicode'))
 
 
