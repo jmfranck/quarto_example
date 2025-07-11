@@ -9,6 +9,8 @@ import threading
 import yaml
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from selenium import webdriver
+import selenium
 
 include_pattern = re.compile(r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}")
 
@@ -18,7 +20,7 @@ heading_pattern = re.compile(r"^(#+)\s+(.*?)\s*\{#(sec|fig|tab):([A-Za-z0-9_-]+)
 
 def load_rendered_files():
     cfg = yaml.safe_load(Path('_quarto.yml').read_text())
-    return set(cfg.get('project', {}).get('render', []))
+    return list(cfg.get('project', {}).get('render', []))
 
 
 def build_include_map(render_files):
@@ -146,6 +148,23 @@ def all_files(render_files, tree):
     return files
 
 
+def build_order(render_files, tree):
+    order = []
+    visited = set()
+
+    def visit(f):
+        if f in visited:
+            return
+        visited.add(f)
+        for child in tree.get(f, []):
+            visit(child)
+        order.append(f)
+
+    for f in render_files:
+        visit(f)
+    return order
+
+
 def mirror_and_modify(files, anchors, roots):
     project_root = Path('.').resolve()
     for file in files:
@@ -170,7 +189,7 @@ def mirror_and_modify(files, anchors, roots):
 
 
 def render_file(dest: Path, fragment: bool):
-    args = ['quarto', 'render', dest.name, '--no-execute']
+    args = ['quarto', 'render', dest.name]
     if fragment:
         args += ['--to', 'html', '--template', str(BODY_TEMPLATE)]
     args += ['--output', dest.with_suffix('.html').name]
@@ -186,21 +205,42 @@ def build_all():
 
     files = all_files(render_files, tree)
     mirror_and_modify(files, anchors, roots)
-    for f in files:
-        if f not in render_files:
-            render_file(BUILD_DIR / f, True)
-    for f in render_files:
-        render_file(BUILD_DIR / f, False)
+    order = build_order(render_files, tree)
+    for f in order:
+        fragment = f not in render_files
+        render_file(BUILD_DIR / f, fragment)
+
+
+class BrowserReloader:
+    def __init__(self, url: str):
+        self.url = url
+        self.init_browser()
+
+    def init_browser(self):
+        try:
+            self.browser = webdriver.Chrome()
+        except Exception:
+            self.browser = webdriver.Firefox()
+        self.browser.get(self.url)
+
+    def refresh(self):
+        try:
+            self.browser.refresh()
+        except selenium.common.exceptions.WebDriverException:
+            self.browser.quit()
+            self.init_browser()
 
 
 class ChangeHandler(FileSystemEventHandler):
-    def __init__(self, build_func):
+    def __init__(self, build_func, refresher):
         self.build = build_func
+        self.refresher = refresher
 
     def on_modified(self, event):
         if not event.is_directory and event.src_path.endswith('.qmd') and '/_build/' not in event.src_path:
             print(f"Change detected: {event.src_path}")
             self.build()
+            self.refresher.refresh()
 
 
 def serve(dir: str = '_build', port: int = 8000):
@@ -218,9 +258,17 @@ def serve(dir: str = '_build', port: int = 8000):
 
 def watch_and_serve():
     build_all()
-    threading.Thread(target=serve, daemon=True).start()
+    port = 8000
+    render_files = load_rendered_files()
+    if render_files:
+        start_page = Path(render_files[0]).with_suffix('.html').as_posix()
+    else:
+        start_page = ''
+    url = f"http://localhost:{port}/{start_page}"
+    threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
+    refresher = BrowserReloader(url)
     observer = Observer()
-    handler = ChangeHandler(build_all)
+    handler = ChangeHandler(build_all, refresher)
     observer.schedule(handler, '.', recursive=True)
     observer.start()
     try:
