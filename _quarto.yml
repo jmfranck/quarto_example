@@ -3,7 +3,7 @@ project:
   type: website
   render:
     - notebook250708.qmd
-    - project1/index.qmd
+    - projects.qmd
     - project1/example.qmd
 
 website:
