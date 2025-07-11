@@ -10,7 +10,7 @@ website:
   sidebar:
     contents:
       - notebook250708.qmd
-      - project1/index.qmd
+      - projects.qmd
       - project1/example.qmd
 
 execute:

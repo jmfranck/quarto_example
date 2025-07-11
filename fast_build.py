@@ -147,11 +147,15 @@ def build_include_tree(render_files):
         if current in visited or not current.exists():
             continue
         visited.add(current)
-        root_dir = root_dirs.get(current, root_dirs.get(Path(current), current.parent))
+        root_dir = root_dirs.get(current, current.parent)
         includes = []
         text = current.read_text()
         for _kind, inc in include_pattern.findall(text):
-            target = (root_dir / inc).resolve()
+            target = (current.parent / inc).resolve()
+            if not target.exists():
+                target = (root_dir / inc).resolve()
+            if not target.exists():
+                target = (root_dir.parent / inc).resolve()
             if not target.exists():
                 continue
             try:
@@ -212,7 +216,11 @@ def mirror_and_modify(files, anchors, roots):
 
         def repl(match: re.Match) -> str:
             kind, inc = match.groups()
-            target_src = (root_dir / inc).resolve()
+            target_src = (src.parent / inc).resolve()
+            if not target_src.exists():
+                target_src = (root_dir / inc).resolve()
+            if not target_src.exists():
+                target_src = (root_dir.parent / inc).resolve()
             target_rel = target_src.relative_to(project_root)
             html_path = (BUILD_DIR / target_rel).with_suffix('.html')
             inc_path = os.path.relpath(html_path, dest.parent)
@@ -267,7 +275,9 @@ from lxml import html as lxml_html
 
 def add_navigation(html_path: Path):
     """Insert navigation menu built from headings using a Jinja template."""
-    root = lxml_html.fromstring(html_path.read_text())
+    parser = lxml_html.HTMLParser(encoding='utf-8')
+    tree = lxml_html.parse(str(html_path), parser)
+    root = tree.getroot()
     body = root.xpath('//body')
     if not body:
         return
@@ -289,9 +299,16 @@ def add_navigation(html_path: Path):
     if items:
         env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
         tmpl = env.get_template(NAV_TEMPLATE.name)
-        fragment = lxml_html.fromstring(tmpl.render(items=items))
-        body[0].insert(0, fragment)
-    html_path.write_text(lxml_html.tostring(root, encoding='unicode'))
+        rendered = tmpl.render(items=items)
+        frags = lxml_html.fragments_fromstring(rendered)
+        head = root.xpath('//head')
+        head = head[0] if head else None
+        for frag in frags:
+            if frag.tag == 'style' and head is not None:
+                head.append(frag)
+            else:
+                body[0].insert(0, frag)
+    tree.write(str(html_path), encoding='utf-8', method='html')
 
 
 def postprocess_html(html_path: Path):
