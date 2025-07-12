@@ -133,6 +133,22 @@ def replace_refs(path, anchors):
 BUILD_DIR = Path('_build')
 BODY_TEMPLATE = Path('body-only.html').resolve()
 NAV_TEMPLATE = Path('nav_template.html').resolve()
+MATHJAX_DIR = Path('mathjax').resolve()
+
+
+def ensure_mathjax():
+    """Ensure MathJax is available locally using npm if necessary."""
+    script = MATHJAX_DIR / 'es5' / 'tex-mml-chtml.js'
+    if script.exists():
+        return
+    tmp = Path('_mjtmp')
+    tmp.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['npm', 'init', '-y'], cwd=tmp, check=True)
+    subprocess.run(['npm', 'install', 'mathjax-full'], cwd=tmp, check=True)
+    src = tmp / 'node_modules' / 'mathjax-full' / 'es5'
+    (MATHJAX_DIR / 'es5').mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, MATHJAX_DIR / 'es5', dirs_exist_ok=True)
+    shutil.rmtree(tmp)
 
 
 def build_include_tree(render_files):
@@ -257,7 +273,7 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
         "--embed-resources",
         "--lua-filter",
         os.path.relpath(BUILD_DIR / 'obs.lua', dest.parent),
-        "--mathjax=https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
+        f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}",
         "-o",
         dest.with_suffix(".html").name,
     ]
@@ -339,8 +355,9 @@ def postprocess_html(html_path: Path):
     if has_math and not has_script:
         head = root.xpath('//head')
         if head:
+            path = os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', html_path.parent)
             script = lxml_html.fragment_fromstring(
-                '<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>',
+                f'<script id="MathJax-script" async src="{path}"></script>',
                 create_parent=False,
             )
             head[0].append(script)
@@ -349,6 +366,8 @@ def postprocess_html(html_path: Path):
 
 def build_all():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_mathjax()
+    shutil.copytree(MATHJAX_DIR, BUILD_DIR / 'mathjax', dirs_exist_ok=True)
     # copy project configuration without the render list so individual renders
     # don't attempt to build the entire project
     cfg = yaml.safe_load(Path('_quarto.yml').read_text())
