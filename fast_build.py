@@ -341,7 +341,12 @@ def add_navigation(html_path: Path, pages: list[dict], current: str):
         return
     env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
     tmpl = env.get_template(NAV_TEMPLATE.name)
-    rendered = tmpl.render(pages=pages, current=current)
+    local_pages = []
+    for page in pages:
+        href_path = (BUILD_DIR / page['file']).with_suffix('.html')
+        href = os.path.relpath(href_path, html_path.parent)
+        local_pages.append({**page, 'href': href})
+    rendered = tmpl.render(pages=local_pages, current=current)
     frags = lxml_html.fragments_fromstring(rendered)
     head = root.xpath("//head")
     head = head[0] if head else None
