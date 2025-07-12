@@ -16,6 +16,15 @@ from watchdog.events import FileSystemEventHandler
 from selenium import webdriver
 import selenium
 from jinja2 import Environment, FileSystemLoader
+import nbformat
+from nbconvert.preprocessors import ExecutePreprocessor
+import html as html_lib
+
+# Ensure Pandoc can be found even if only Quarto is installed
+if not shutil.which("pandoc"):
+    quarto_pandoc = Path("/opt/quarto/bin/tools/x86_64/pandoc")
+    if quarto_pandoc.exists():
+        os.environ["PATH"] += os.pathsep + str(quarto_pandoc.parent)
 
 include_pattern = re.compile(r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}")
 # Python code block pattern
@@ -45,6 +54,53 @@ def load_bibliography_csl():
                 bib = bib or v.get('bibliography')
                 csl = csl or v.get('csl')
     return bib, csl
+
+
+def outputs_to_html(outputs: list[dict]) -> str:
+    """Convert Jupyter cell outputs to HTML with embedded images."""
+    parts = []
+    for out in outputs:
+        typ = out.get("output_type")
+        if typ == "stream":
+            text = out.get("text", "")
+            parts.append(f"<pre>{html_lib.escape(text)}</pre>")
+        elif typ in {"display_data", "execute_result"}:
+            data = out.get("data", {})
+            if "text/html" in data:
+                parts.append(data["text/html"])
+            elif "image/png" in data:
+                src = f"data:image/png;base64,{data['image/png']}"
+                parts.append(f"<img src='{src}'/>")
+            elif "image/jpeg" in data:
+                src = f"data:image/jpeg;base64,{data['image/jpeg']}"
+                parts.append(f"<img src='{src}'/>")
+            elif "text/plain" in data:
+                parts.append(f"<pre>{html_lib.escape(data['text/plain'])}</pre>")
+        elif typ == "error":
+            tb = "\n".join(out.get("traceback", []))
+            if not tb:
+                tb = f"{out.get('ename', '')}: {out.get('evalue', '')}"
+            parts.append(f"<pre style='color:red;'>{html_lib.escape(tb)}</pre>")
+    return "\n".join(parts)
+
+
+def execute_code_blocks(blocks: dict[str, list[str]]) -> dict[tuple[str, int], str]:
+    """Run code blocks as Jupyter notebooks and return HTML outputs."""
+    results: dict[tuple[str, int], str] = {}
+    for src, cells in blocks.items():
+        if not cells:
+            continue
+        nb = nbformat.v4.new_notebook()
+        nb.cells = [nbformat.v4.new_code_cell(c) for c in cells]
+        ep = ExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
+        try:
+            ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
+        except Exception:
+            pass  # errors are captured in cell outputs
+        for idx, cell in enumerate(nb.cells, start=1):
+            html = outputs_to_html(cell.get("outputs", []))
+            results[(src, idx)] = html
+    return results
 
 
 def build_include_map(render_files):
@@ -222,6 +278,7 @@ def build_order(render_files, tree):
 
 def mirror_and_modify(files, anchors, roots):
     project_root = PROJECT_ROOT
+    code_blocks: dict[str, list[str]] = {}
     for file in files:
         src = Path(file)
         dest = BUILD_DIR / file
@@ -253,10 +310,12 @@ def mirror_and_modify(files, anchors, roots):
             code = match.group(1)
             md5 = hashlib.md5(code.encode()).hexdigest()
             src_rel = str(src)
+            code_blocks.setdefault(src_rel, []).append(code)
             return f"<div data-script=\"{src_rel}\" data-index=\"{idx}\" data-md5=\"{md5}\"></div>"
 
         text = code_pattern.sub(repl_code, text)
         dest.write_text(text)
+    return code_blocks
 
 
 PROJECT_ROOT = Path('.').resolve()
@@ -394,6 +453,32 @@ def postprocess_html(html_path: Path):
     html_path.write_text(lxml_html.tostring(root, encoding='unicode'))
 
 
+def substitute_code_placeholders(html_path: Path, outputs: dict[tuple[str, int], str]):
+    """Replace script placeholders in ``html_path`` using executed outputs."""
+    parser = lxml_html.HTMLParser(encoding="utf-8")
+    tree = lxml_html.parse(str(html_path), parser)
+    root = tree.getroot()
+    changed = False
+    for node in list(root.xpath('//div[@data-script][@data-index]')):
+        src = node.get('data-script')
+        try:
+            idx = int(node.get('data-index', '0'))
+        except ValueError:
+            idx = 0
+        html = outputs.get((src, idx), '')
+        frags = lxml_html.fragments_fromstring(html) if html else []
+        parent = node.getparent()
+        if parent is None:
+            continue
+        pos = parent.index(node)
+        parent.remove(node)
+        for frag in reversed(frags):
+            parent.insert(pos, frag)
+        changed = True
+    if changed:
+        tree.write(str(html_path), encoding="utf-8", method="html")
+
+
 def build_all():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     ensure_mathjax()
@@ -413,7 +498,7 @@ def build_all():
     anchors = collect_anchors(render_files, include_map)
 
     files = all_files(render_files, tree)
-    mirror_and_modify(files, anchors, roots)
+    code_blocks = mirror_and_modify(files, anchors, roots)
     order = build_order(render_files, tree)
     for f in order:
         fragment = f not in render_files
@@ -436,6 +521,12 @@ def build_all():
     for page in pages:
         html_file = (BUILD_DIR / page['file']).with_suffix('.html')
         add_navigation(html_file, pages, page['file'])
+
+    outputs = execute_code_blocks(code_blocks)
+    for f in files:
+        html_file = (BUILD_DIR / f).with_suffix('.html')
+        if html_file.exists():
+            substitute_code_placeholders(html_file, outputs)
 
 
 class BrowserReloader:
