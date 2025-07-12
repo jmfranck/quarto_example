@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""Minimal build script using Pandoc instead of Quarto."""
+
+import hashlib
 import os
 import re
 import subprocess
@@ -12,8 +15,11 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from selenium import webdriver
 import selenium
+from jinja2 import Environment, FileSystemLoader
 
 include_pattern = re.compile(r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}")
+# Python code block pattern
+code_pattern = re.compile(r"```\{python[^}]*\}\n(.*?)```", re.DOTALL)
 
 # Collect anchor definitions {#sec:id}, {#fig:id}, {#tab:id}
 anchor_pattern = re.compile(r"\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}")
@@ -22,6 +28,23 @@ heading_pattern = re.compile(r"^(#+)\s+(.*?)\s*\{#(sec|fig|tab):([A-Za-z0-9_-]+)
 def load_rendered_files():
     cfg = yaml.safe_load(Path('_quarto.yml').read_text())
     return list(cfg.get('project', {}).get('render', []))
+
+
+def load_bibliography_csl():
+    cfg = yaml.safe_load(Path('_quarto.yml').read_text())
+    bib = None
+    csl = None
+    if 'bibliography' in cfg:
+        bib = cfg['bibliography']
+    if 'csl' in cfg:
+        csl = cfg['csl']
+    fmt = cfg.get('format', {})
+    if isinstance(fmt, dict):
+        for v in fmt.values():
+            if isinstance(v, dict):
+                bib = bib or v.get('bibliography')
+                csl = csl or v.get('csl')
+    return bib, csl
 
 
 def build_include_map(render_files):
@@ -109,6 +132,24 @@ def replace_refs(path, anchors):
 
 BUILD_DIR = Path('_build')
 BODY_TEMPLATE = Path('body-only.html').resolve()
+PANDOC_TEMPLATE = Path('pandoc_template.html').resolve()
+NAV_TEMPLATE = Path('nav_template.html').resolve()
+MATHJAX_DIR = Path('mathjax').resolve()
+
+
+def ensure_mathjax():
+    """Ensure MathJax is available locally using npm if necessary."""
+    script = MATHJAX_DIR / 'es5' / 'tex-mml-chtml.js'
+    if script.exists():
+        return
+    tmp = Path('_mjtmp')
+    tmp.mkdir(parents=True, exist_ok=True)
+    subprocess.run(['npm', 'init', '-y'], cwd=tmp, check=True)
+    subprocess.run(['npm', 'install', 'mathjax-full'], cwd=tmp, check=True)
+    src = tmp / 'node_modules' / 'mathjax-full' / 'es5'
+    (MATHJAX_DIR / 'es5').mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, MATHJAX_DIR / 'es5', dirs_exist_ok=True)
+    shutil.rmtree(tmp)
 
 
 def build_include_tree(render_files):
@@ -123,18 +164,24 @@ def build_include_tree(render_files):
         if current in visited or not current.exists():
             continue
         visited.add(current)
-        root_dir = root_dirs.get(current, root_dirs.get(Path(current), current.parent))
+        root_dir = root_dirs.get(current, current.parent)
         includes = []
         text = current.read_text()
         for _kind, inc in include_pattern.findall(text):
-            target = (root_dir / inc).resolve()
+            target = (current.parent / inc).resolve()
+            if not target.exists():
+                target = (root_dir / inc).resolve()
+            if not target.exists():
+                target = (root_dir.parent / inc).resolve()
+            if not target.exists():
+                continue
             try:
                 rel = target.relative_to(root).as_posix()
             except ValueError:
                 rel = target.as_posix()
             includes.append(rel)
             stack.append(target)
-            root_dirs[target] = root_dir
+            root_dirs.setdefault(target, target.parent)
         try:
             key = current.relative_to(root).as_posix()
         except ValueError:
@@ -146,10 +193,13 @@ def build_include_tree(render_files):
 
 
 def all_files(render_files, tree):
-    files = set(render_files)
+    files = {f for f in render_files if Path(f).exists()}
     for src, incs in tree.items():
-        files.add(src)
-        files.update(incs)
+        if Path(src).exists():
+            files.add(src)
+        for inc in incs:
+            if Path(inc).exists():
+                files.add(inc)
     return files
 
 
@@ -183,7 +233,11 @@ def mirror_and_modify(files, anchors, roots):
 
         def repl(match: re.Match) -> str:
             kind, inc = match.groups()
-            target_src = (root_dir / inc).resolve()
+            target_src = (src.parent / inc).resolve()
+            if not target_src.exists():
+                target_src = (root_dir / inc).resolve()
+            if not target_src.exists():
+                target_src = (root_dir.parent / inc).resolve()
             target_rel = target_src.relative_to(project_root)
             html_path = (BUILD_DIR / target_rel).with_suffix('.html')
             inc_path = os.path.relpath(html_path, dest.parent)
@@ -191,29 +245,118 @@ def mirror_and_modify(files, anchors, roots):
             return f"<div data-{kind.lower()}=\"{inc_path}\"></div>"
 
         text = include_pattern.sub(repl, text)
+
+        idx = 0
+        def repl_code(match: re.Match) -> str:
+            nonlocal idx
+            idx += 1
+            code = match.group(1)
+            md5 = hashlib.md5(code.encode()).hexdigest()
+            src_rel = str(src)
+            return f"<div data-script=\"{src_rel}\" data-index=\"{idx}\" data-md5=\"{md5}\"></div>"
+
+        text = code_pattern.sub(repl_code, text)
         dest.write_text(text)
 
 
 PROJECT_ROOT = Path('.').resolve()
 
 
-def render_file(src: Path, dest: Path, fragment: bool):
-    """Render ``src`` to ``dest`` using Quarto with embedded resources."""
+def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=None):
+    """Render ``src`` to ``dest`` using Pandoc with embedded resources."""
 
+    template = BODY_TEMPLATE if fragment else PANDOC_TEMPLATE
     args = [
-        "quarto",
-        "render",
-        dest.name,
+        "pandoc",
+        src.name,
+        "--from",
+        "markdown+raw_html",
+        "--standalone",
+        "--embed-resources",
+        "--lua-filter",
+        os.path.relpath(BUILD_DIR / 'obs.lua', dest.parent),
+        f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}",
+        "--template",
+        os.path.relpath(template, dest.parent),
+        "-o",
+        dest.with_suffix(".html").name,
     ]
-    if fragment:
-        args.append("--embed-resources")
-        template_path = os.path.relpath(BODY_TEMPLATE, dest.parent)
-        args += ["--to", "html", "--template", template_path]
-    args += ["--output", dest.with_suffix(".html").name]
+    if bibliography:
+        args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
+    if csl:
+        args += ["--csl", os.path.relpath(csl, dest.parent)]
     subprocess.run(args, check=True, cwd=dest.parent)
 
 
 from lxml import html as lxml_html
+
+
+def parse_headings(html_path: Path):
+    """Return a nested list of headings found in ``html_path``."""
+    parser = lxml_html.HTMLParser(encoding="utf-8")
+    tree = lxml_html.parse(str(html_path), parser)
+    root = tree.getroot()
+    headings = root.xpath("//h1|//h2|//h3|//h4|//h5|//h6")
+    items: list[dict] = []
+    stack = []
+    for h in headings:
+        level = int(h.tag[1])
+        text = "".join(h.itertext()).strip()
+        ident = h.get("id")
+        node = {"level": level, "text": text, "id": ident, "children": []}
+        while stack and stack[-1]["level"] >= level:
+            stack.pop()
+        if stack:
+            stack[-1]["children"].append(node)
+        else:
+            items.append(node)
+        stack.append(node)
+    return items
+
+
+def read_title(qmd: Path) -> str:
+    text = qmd.read_text()
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            try:
+                meta = yaml.safe_load(text[3:end])
+                if isinstance(meta, dict) and "title" in meta:
+                    return str(meta["title"])
+            except Exception:
+                pass
+    m = re.search(r"^#\s+(.+)", text, re.MULTILINE)
+    if m:
+        return m.group(1).strip()
+    return qmd.stem
+
+
+def add_navigation(html_path: Path, pages: list[dict], current: str):
+    """Insert navigation menu for ``html_path`` using ``pages`` data."""
+    parser = lxml_html.HTMLParser(encoding="utf-8")
+    tree = lxml_html.parse(str(html_path), parser)
+    root = tree.getroot()
+    body = root.xpath("//body")
+    if not body:
+        return
+    env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
+    tmpl = env.get_template(NAV_TEMPLATE.name)
+    local_pages = []
+    for page in pages:
+        href_path = (BUILD_DIR / page['file']).with_suffix('.html')
+        href = os.path.relpath(href_path, html_path.parent)
+        local_pages.append({**page, 'href': href})
+    rendered = tmpl.render(pages=local_pages, current=current)
+    frags = lxml_html.fragments_fromstring(rendered)
+    head = root.xpath("//head")
+    head = head[0] if head else None
+    for frag in frags:
+        if frag.tag == "style" and head is not None:
+            head.append(frag)
+        else:
+            body[0].insert(0, frag)
+    tree.write(str(html_path), encoding="utf-8", method="html")
+
 
 def postprocess_html(html_path: Path):
     """Replace placeholder nodes with referenced HTML bodies."""
@@ -242,8 +385,9 @@ def postprocess_html(html_path: Path):
     if has_math and not has_script:
         head = root.xpath('//head')
         if head:
+            path = os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', html_path.parent)
             script = lxml_html.fragment_fromstring(
-                '<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>',
+                f'<script id="MathJax-script" async src="{path}"></script>',
                 create_parent=False,
             )
             head[0].append(script)
@@ -252,6 +396,8 @@ def postprocess_html(html_path: Path):
 
 def build_all():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_mathjax()
+    shutil.copytree(MATHJAX_DIR, BUILD_DIR / 'mathjax', dirs_exist_ok=True)
     # copy project configuration without the render list so individual renders
     # don't attempt to build the entire project
     cfg = yaml.safe_load(Path('_quarto.yml').read_text())
@@ -261,6 +407,7 @@ def build_all():
     if Path('obs.lua').exists():
         shutil.copy2('obs.lua', BUILD_DIR / 'obs.lua')
     render_files = load_rendered_files()
+    bibliography, csl = load_bibliography_csl()
     include_map = build_include_map(render_files)
     tree, roots = build_include_tree(render_files)
     anchors = collect_anchors(render_files, include_map)
@@ -270,8 +417,25 @@ def build_all():
     order = build_order(render_files, tree)
     for f in order:
         fragment = f not in render_files
-        render_file(Path(f), BUILD_DIR / f, fragment)
-        postprocess_html((BUILD_DIR / f).with_suffix('.html'))
+        render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl)
+        html_file = (BUILD_DIR / f).with_suffix('.html')
+        postprocess_html(html_file)
+
+    pages = []
+    for qmd in render_files:
+        html_file = (BUILD_DIR / qmd).with_suffix('.html')
+        if html_file.exists():
+            sections = parse_headings(html_file)
+            pages.append({
+                'file': qmd,
+                'href': html_file.name,
+                'title': read_title(Path(qmd)),
+                'sections': sections,
+            })
+
+    for page in pages:
+        html_file = (BUILD_DIR / page['file']).with_suffix('.html')
+        add_navigation(html_file, pages, page['file'])
 
 
 class BrowserReloader:
@@ -343,7 +507,7 @@ def watch_and_serve():
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Resolve refs and build site")
+    parser = argparse.ArgumentParser(description="Build site using Pandoc")
     parser.add_argument('--watch', action='store_true', help='Watch files and serve site')
     args = parser.parse_args()
     if args.watch:
