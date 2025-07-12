@@ -291,42 +291,66 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
 from lxml import html as lxml_html
 
 
-def add_navigation(html_path: Path):
-    """Insert navigation menu built from headings using a Jinja template."""
-    parser = lxml_html.HTMLParser(encoding='utf-8')
+def parse_headings(html_path: Path):
+    """Return a nested list of headings found in ``html_path``."""
+    parser = lxml_html.HTMLParser(encoding="utf-8")
     tree = lxml_html.parse(str(html_path), parser)
     root = tree.getroot()
-    body = root.xpath('//body')
-    if not body:
-        return
-    headings = root.xpath('//h1|//h2|//h3|//h4|//h5|//h6')
-    items = []
+    headings = root.xpath("//h1|//h2|//h3|//h4|//h5|//h6")
+    items: list[dict] = []
     stack = []
     for h in headings:
         level = int(h.tag[1])
-        text = ''.join(h.itertext()).strip()
-        ident = h.get('id')
-        node = {'level': level, 'text': text, 'id': ident, 'children': []}
-        while stack and stack[-1]['level'] >= level:
+        text = "".join(h.itertext()).strip()
+        ident = h.get("id")
+        node = {"level": level, "text": text, "id": ident, "children": []}
+        while stack and stack[-1]["level"] >= level:
             stack.pop()
         if stack:
-            stack[-1]['children'].append(node)
+            stack[-1]["children"].append(node)
         else:
             items.append(node)
         stack.append(node)
-    if items:
-        env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
-        tmpl = env.get_template(NAV_TEMPLATE.name)
-        rendered = tmpl.render(items=items)
-        frags = lxml_html.fragments_fromstring(rendered)
-        head = root.xpath('//head')
-        head = head[0] if head else None
-        for frag in frags:
-            if frag.tag == 'style' and head is not None:
-                head.append(frag)
-            else:
-                body[0].insert(0, frag)
-    tree.write(str(html_path), encoding='utf-8', method='html')
+    return items
+
+
+def read_title(qmd: Path) -> str:
+    text = qmd.read_text()
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            try:
+                meta = yaml.safe_load(text[3:end])
+                if isinstance(meta, dict) and "title" in meta:
+                    return str(meta["title"])
+            except Exception:
+                pass
+    m = re.search(r"^#\s+(.+)", text, re.MULTILINE)
+    if m:
+        return m.group(1).strip()
+    return qmd.stem
+
+
+def add_navigation(html_path: Path, pages: list[dict], current: str):
+    """Insert navigation menu for ``html_path`` using ``pages`` data."""
+    parser = lxml_html.HTMLParser(encoding="utf-8")
+    tree = lxml_html.parse(str(html_path), parser)
+    root = tree.getroot()
+    body = root.xpath("//body")
+    if not body:
+        return
+    env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
+    tmpl = env.get_template(NAV_TEMPLATE.name)
+    rendered = tmpl.render(pages=pages, current=current)
+    frags = lxml_html.fragments_fromstring(rendered)
+    head = root.xpath("//head")
+    head = head[0] if head else None
+    for frag in frags:
+        if frag.tag == "style" and head is not None:
+            head.append(frag)
+        else:
+            body[0].insert(0, frag)
+    tree.write(str(html_path), encoding="utf-8", method="html")
 
 
 def postprocess_html(html_path: Path):
@@ -391,8 +415,22 @@ def build_all():
         render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl)
         html_file = (BUILD_DIR / f).with_suffix('.html')
         postprocess_html(html_file)
-        if f in render_files:
-            add_navigation(html_file)
+
+    pages = []
+    for qmd in render_files:
+        html_file = (BUILD_DIR / qmd).with_suffix('.html')
+        if html_file.exists():
+            sections = parse_headings(html_file)
+            pages.append({
+                'file': qmd,
+                'href': html_file.name,
+                'title': read_title(Path(qmd)),
+                'sections': sections,
+            })
+
+    for page in pages:
+        html_file = (BUILD_DIR / page['file']).with_suffix('.html')
+        add_navigation(html_file, pages, page['file'])
 
 
 class BrowserReloader:

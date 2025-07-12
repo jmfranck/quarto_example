@@ -1,17 +1,17 @@
 <style>
-  body { margin-left:10px; margin-right:200px; max-width:60em; }
+  body { margin-left:10px; margin-right:220px; max-width:60em; }
   #on-this-page {position:fixed; right:0; top:100px; width:200px; max-height:70vh;
     overflow:auto; background:rgba(248,249,250,0.5); padding:10px;
-    border-left:3px solid #0d6efd; font-family:"Helvetica Neue", Arial, sans-serif;
-    font-size:0.9em;}
+    font-family:"Helvetica Neue", Arial, sans-serif; font-size:0.9em;}
+  #on-this-page .page-title {border-left:3px solid #6c757d; padding-left:4px; margin:2px 0;}
+  #on-this-page .page-title.current {background:rgba(13,110,253,0.15);}
+  #on-this-page .outline {border-left:3px solid #0d6efd; margin-left:3px; padding-left:4px;}
   #on-this-page ul { list-style:none; padding-left:15px; margin:0; }
   #on-this-page li { margin:2px 0; }
   #on-this-page a { text-decoration:none; color:inherit; cursor:pointer; }
-  #on-this-page a.active {font-weight:bold; background:rgba(13,110,253,0.15);
-    border-radius:4px; padding:2px 4px;}
+  #on-this-page a.active {font-weight:bold; background:rgba(13,110,253,0.15); border-radius:4px; padding:2px 4px;}
 </style>
 <div id="on-this-page">
-  <strong>On this page</strong>
   {% macro render(items) -%}
   <ul>
   {%- for item in items %}
@@ -23,39 +23,34 @@
   {%- endfor %}
   </ul>
   {%- endmacro %}
-  {{ render(items) }}
+  {% for page in pages %}
+    <div class="page-title{% if page.file == current %} current{% endif %}"><a href="{{ page.href }}">{{ page.title }}</a></div>
+    <div class="outline">
+      {{ render(page.sections) }}
+    </div>
+  {% endfor %}
 </div>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const menu = document.querySelector('#on-this-page');
-  const links = menu.querySelectorAll('a');
-
-  // collapse/expand
-  menu.querySelectorAll('li').forEach(li => {
-    const sub = li.querySelector('ul');
-    if(sub){
-      sub.style.display = 'none';
-      li.firstElementChild.addEventListener('click', evt => {
-        evt.preventDefault();
-        sub.style.display = sub.style.display === 'block' ? 'none' : 'block';
-        location.hash = li.firstElementChild.getAttribute('href');
-      });
+  menu.querySelectorAll('.page-title').forEach(title => {
+    const outline = title.nextElementSibling;
+    if(!title.classList.contains('current') && outline){
+      outline.style.display = 'none';
     }
+    title.addEventListener('click', () => {
+      if(outline){
+        outline.style.display = outline.style.display === 'block' ? 'none' : 'block';
+      }
+    });
   });
+
+  const links = menu.querySelectorAll('.outline a');
 
   function activate(id){
     links.forEach(l => {
       const match = l.getAttribute('href').slice(1) === id;
       l.classList.toggle('active', match);
-      if(match){
-        let p = l.parentElement;
-        while(p && p !== menu){
-          if(p.tagName.toLowerCase() === 'ul'){
-            p.style.display = 'block';
-          }
-          p = p.parentElement;
-        }
-      }
     });
   }
 
@@ -63,13 +58,13 @@ document.addEventListener('DOMContentLoaded', function() {
   const obs = new IntersectionObserver(entries => {
     entries.forEach(e => {
       if(e.isIntersecting){
-        // collapse all sublists first
-        menu.querySelectorAll('ul').forEach(u => { if(u !== menu.querySelector('ul')) u.style.display = 'none'; });
         activate(e.target.id);
       }
     });
   }, opts);
-  const sections = Array.from(links, l => document.getElementById(l.getAttribute('href').slice(1))).filter(Boolean);
-  sections.forEach(s => obs.observe(s));
+  links.forEach(l => {
+    const t = document.getElementById(l.getAttribute('href').slice(1));
+    if(t) obs.observe(t);
+  });
 });
 </script>
