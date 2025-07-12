@@ -6,3 +6,5 @@
 *.quarto_ipynb
 tags
 mathjax/
+_build/
+_mjtmp/

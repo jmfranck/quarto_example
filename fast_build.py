@@ -132,6 +132,7 @@ def replace_refs(path, anchors):
 
 BUILD_DIR = Path('_build')
 BODY_TEMPLATE = Path('body-only.html').resolve()
+PANDOC_TEMPLATE = Path('pandoc_template.html').resolve()
 NAV_TEMPLATE = Path('nav_template.html').resolve()
 MATHJAX_DIR = Path('mathjax').resolve()
 
@@ -264,6 +265,7 @@ PROJECT_ROOT = Path('.').resolve()
 def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=None):
     """Render ``src`` to ``dest`` using Pandoc with embedded resources."""
 
+    template = BODY_TEMPLATE if fragment else PANDOC_TEMPLATE
     args = [
         "pandoc",
         src.name,
@@ -274,12 +276,11 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
         "--lua-filter",
         os.path.relpath(BUILD_DIR / 'obs.lua', dest.parent),
         f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}",
+        "--template",
+        os.path.relpath(template, dest.parent),
         "-o",
         dest.with_suffix(".html").name,
     ]
-    if fragment:
-        template_path = os.path.relpath(BODY_TEMPLATE, dest.parent)
-        args += ["--template", template_path]
     if bibliography:
         args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
     if csl:
