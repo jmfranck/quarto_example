@@ -8,6 +8,7 @@
   #on-this-page .outline {border-left:3px solid #0d6efd; margin-left:3px; padding-left:4px;}
   #on-this-page ul { list-style:none; padding-left:15px; margin:0; }
   #on-this-page li { margin:2px 0; }
+  #on-this-page li.collapsed > ul { display:none; }
   #on-this-page a { text-decoration:none; color:inherit; cursor:pointer; }
   #on-this-page a.active {font-weight:bold; background:rgba(13,110,253,0.15); border-radius:4px; padding:2px 4px;}
 </style>
@@ -45,14 +46,54 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
+  // collapse all sublists initially
+  menu.querySelectorAll('.outline ul ul').forEach(ul => {
+    ul.parentElement.classList.add('collapsed');
+  });
+
   const links = menu.querySelectorAll('.outline a');
 
+  function showPath(li){
+    while(li && li !== menu){
+      if(li.tagName === 'LI'){
+        li.classList.remove('collapsed');
+      }
+      li = li.parentElement.closest('li');
+    }
+  }
+
+  function collapseOthers(activeLi){
+    menu.querySelectorAll('.outline li').forEach(li => {
+      if(li !== activeLi && !li.contains(activeLi)){
+        if(li.querySelector(':scope > ul')){
+          li.classList.add('collapsed');
+        }
+      }
+    });
+  }
+
   function activate(id){
+    let activeLi = null;
     links.forEach(l => {
       const match = l.getAttribute('href').slice(1) === id;
       l.classList.toggle('active', match);
+      if(match) activeLi = l.parentElement;
     });
+    if(activeLi){
+      showPath(activeLi);
+      collapseOthers(activeLi);
+    }
   }
+
+  links.forEach(l => {
+    const li = l.parentElement;
+    const sub = li.querySelector(':scope > ul');
+    if(sub){
+      l.addEventListener('click', () => {
+        li.classList.toggle('collapsed');
+      });
+    }
+  });
 
   const opts = {rootMargin: '0px 0px -80% 0px'};
   const obs = new IntersectionObserver(entries => {
