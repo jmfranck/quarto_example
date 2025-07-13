@@ -8,3 +8,5 @@ tags
 mathjax/
 _build/
 _mjtmp/
+
+_nbcache/
