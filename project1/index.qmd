@@ -4,4 +4,4 @@ title: "Project1"
 
 Here is a reference that should be on the same page: @sec:task1
 
-{{< include subproject1/index.qmd >}}
+{{< include project1/subproject1/index.qmd >}}

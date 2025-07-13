@@ -344,7 +344,10 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
         args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
     if csl:
         args += ["--csl", os.path.relpath(csl, dest.parent)]
-    subprocess.run(args, check=True, cwd=dest.parent)
+    try:
+        subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"{e.stderr}")
 
 
 from lxml import html as lxml_html
