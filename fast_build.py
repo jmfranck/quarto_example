@@ -237,7 +237,10 @@ def build_include_tree(render_files):
                 rel = target.as_posix()
             includes.append(rel)
             stack.append(target)
-            root_dirs.setdefault(target, target.parent)
+            # propagate the original root directory so includes are
+            # resolved relative to the main document rather than the
+            # including file
+            root_dirs.setdefault(target, root_dir)
         try:
             key = current.relative_to(root).as_posix()
         except ValueError:
@@ -290,9 +293,10 @@ def mirror_and_modify(files, anchors, roots):
 
         def repl(match: re.Match) -> str:
             kind, inc = match.groups()
-            target_src = (src.parent / inc).resolve()
+            # include paths are now relative to the main document root
+            target_src = (root_dir / inc).resolve()
             if not target_src.exists():
-                target_src = (root_dir / inc).resolve()
+                target_src = (src.parent / inc).resolve()
             if not target_src.exists():
                 target_src = (root_dir.parent / inc).resolve()
             target_rel = target_src.relative_to(project_root)
@@ -437,8 +441,12 @@ def postprocess_html(html_path: Path):
             parent = node.getparent()
             idx = parent.index(node)
             parent.remove(node)
+            end_c = lxml_html.HtmlComment(f"END include {target_rel}")
+            start_c = lxml_html.HtmlComment(f"BEGIN include {target_rel}")
+            parent.insert(idx, end_c)
             for elem in reversed(elems):
                 parent.insert(idx, elem)
+            parent.insert(idx, start_c)
         else:
             node.getparent().remove(node)
     # add MathJax if math is present
