@@ -597,16 +597,28 @@ def watch_and_serve():
     build_all()
     port = 8000
     render_files = load_rendered_files()
+    include_map = build_include_map(render_files)
+    tree, _ = build_include_tree(render_files)
+    files_to_watch = sorted(all_files(render_files, tree))
+
     if render_files:
         start_page = Path(render_files[0]).with_suffix('.html').as_posix()
     else:
         start_page = ''
     url = f"http://localhost:{port}/{start_page}"
+
+    print("Watching files:")
+    for f in files_to_watch:
+        print(" ", f)
+
     threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
     refresher = BrowserReloader(url)
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
-    observer.schedule(handler, '.', recursive=True)
+    watched_dirs = {str(Path(f).parent) for f in files_to_watch}
+    watched_dirs.add('.')
+    for d in sorted(watched_dirs):
+        observer.schedule(handler, d, recursive=False)
     observer.start()
     try:
         while True:
