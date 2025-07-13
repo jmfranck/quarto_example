@@ -110,38 +110,49 @@ def outputs_to_html(outputs: list[dict]) -> str:
     return "\n".join(parts)
 
 
-def execute_code_blocks(blocks: dict[str, list[str]]) -> dict[tuple[str, int], str]:
-    """Run code blocks as Jupyter notebooks and return HTML outputs."""
+NOTEBOOK_CACHE_DIR = Path("_nbcache")
+
+
+def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[str, int], str]:
+    """Run code blocks as Jupyter notebooks with caching."""
+    NOTEBOOK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     results: dict[tuple[str, int], str] = {}
     for src, cells in blocks.items():
         if not cells:
             continue
-        nb = nbformat.v4.new_notebook()
-        nb.cells = [nbformat.v4.new_code_cell(c) for c in cells]
-        ep = LoggingExecutePreprocessor(
-            kernel_name="python3", timeout=300, allow_errors=True
-        )
-        try:
-            ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
-        except Exception as e:
-            tb = traceback.format_exc()
-            if nb.cells:
-                nb.cells[0].outputs = [
-                    {
-                        "output_type": "error",
-                        "ename": type(e).__name__,
-                        "evalue": str(e),
-                        "traceback": tb.splitlines(),
-                    }
-                ]
-                for cell in nb.cells[1:]:
-                    cell.outputs = [
+        codes = [c for c, _ in cells]
+        md5s = [m for _, m in cells]
+        combined = "".join(md5s).encode()
+        nb_hash = hashlib.md5(combined).hexdigest()
+        nb_path = NOTEBOOK_CACHE_DIR / f"{nb_hash}.ipynb"
+        if nb_path.exists():
+            nb = nbformat.read(nb_path, as_version=4)
+        else:
+            nb = nbformat.v4.new_notebook()
+            nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
+            ep = ExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
+            try:
+                ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
+            except Exception as e:
+                tb = traceback.format_exc()
+                if nb.cells:
+                    nb.cells[0].outputs = [
                         {
-                            "output_type": "stream",
-                            "name": "stderr",
-                            "text": "previous cell failed to execute\n",
+                            "output_type": "error",
+                            "ename": type(e).__name__,
+                            "evalue": str(e),
+                            "traceback": tb.splitlines(),
                         }
                     ]
+                    for cell in nb.cells[1:]:
+                        cell.outputs = [
+                            {
+                                "output_type": "stream",
+                                "name": "stderr",
+                                "text": "previous cell failed to execute\n",
+                            }
+                        ]
+            nbformat.write(nb, nb_path)
         for idx, cell in enumerate(nb.cells, start=1):
             html = outputs_to_html(cell.get("outputs", []))
             results[(src, idx)] = html
@@ -330,7 +341,7 @@ def build_order(render_files, tree):
 
 def mirror_and_modify(files, anchors, roots):
     project_root = PROJECT_ROOT
-    code_blocks: dict[str, list[str]] = {}
+    code_blocks: dict[str, list[tuple[str, str]]] = {}
     for file in files:
         src = Path(file)
         dest = BUILD_DIR / file
@@ -364,9 +375,8 @@ def mirror_and_modify(files, anchors, roots):
             code = match.group(1)
             md5 = hashlib.md5(code.encode()).hexdigest()
             src_rel = str(src)
-            code_blocks.setdefault(src_rel, []).append(code)
-            return f'<div data-script="{src_rel}" data-index="{idx}" data-md5="{md5}"></div>'
-
+            code_blocks.setdefault(src_rel, []).append((code, md5))
+            return f"<div data-script=\"{src_rel}\" data-index=\"{idx}\" data-md5=\"{md5}\"></div>"
         text = code_pattern.sub(repl_code, text)
         dest.write_text(text)
     return code_blocks
@@ -413,6 +423,14 @@ def parse_headings(html_path: Path):
     tree = lxml_html.parse(str(html_path), parser)
     root = tree.getroot()
     headings = root.xpath("//h1|//h2|//h3|//h4|//h5|//h6")
+    # Skip headings used for the page title which Quarto renders with the
+    # ``title`` class. Including these in the navigation duplicates the page
+    # title entry in the section list.
+    def is_page_title(h):
+        cls = h.get('class') or ''
+        return 'title' in cls.split()
+
+    headings = [h for h in headings if not is_page_title(h)]
     items: list[dict] = []
     stack = []
     for h in headings:
