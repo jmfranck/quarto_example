@@ -11,7 +11,8 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
 import shutil
 import yaml
-from watchdog.observers import Observer
+# use a polling observer for wider compatibility
+from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 from selenium import webdriver
 import selenium
@@ -573,11 +574,20 @@ class ChangeHandler(FileSystemEventHandler):
         self.build = build_func
         self.refresher = refresher
 
-    def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith('.qmd') and '/_build/' not in event.src_path:
-            print(f"Change detected: {event.src_path}")
+    def handle(self, path, is_directory):
+        if not is_directory and path.endswith('.qmd') and '/_build/' not in path:
+            print(f"Change detected: {path}")
             self.build()
             self.refresher.refresh()
+
+    def on_modified(self, event):
+        self.handle(event.src_path, event.is_directory)
+
+    def on_created(self, event):
+        self.handle(event.src_path, event.is_directory)
+
+    def on_moved(self, event):
+        self.handle(event.dest_path, event.is_directory)
 
 
 def serve(dir: str = '_build', port: int = 8000):
@@ -598,8 +608,7 @@ def watch_and_serve():
     port = 8000
     render_files = load_rendered_files()
     include_map = build_include_map(render_files)
-    tree, _ = build_include_tree(render_files)
-    files_to_watch = sorted(all_files(render_files, tree))
+    files_to_watch = sorted(set(render_files) | set(include_map.keys()))
 
     if render_files:
         start_page = Path(render_files[0]).with_suffix('.html').as_posix()
