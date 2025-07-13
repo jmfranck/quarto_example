@@ -363,6 +363,14 @@ def parse_headings(html_path: Path):
     tree = lxml_html.parse(str(html_path), parser)
     root = tree.getroot()
     headings = root.xpath("//h1|//h2|//h3|//h4|//h5|//h6")
+    # Skip headings used for the page title which Quarto renders with the
+    # ``title`` class. Including these in the navigation duplicates the page
+    # title entry in the section list.
+    def is_page_title(h):
+        cls = h.get('class') or ''
+        return 'title' in cls.split()
+
+    headings = [h for h in headings if not is_page_title(h)]
     items: list[dict] = []
     stack = []
     for h in headings:
