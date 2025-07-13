@@ -127,31 +127,33 @@ def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[
         nb_hash = hashlib.md5(combined).hexdigest()
         nb_path = NOTEBOOK_CACHE_DIR / f"{nb_hash}.ipynb"
         if nb_path.exists():
+            print(f"Code in {src} was previously cached in {nb_path}", flush=True)
             nb = nbformat.read(nb_path, as_version=4)
         else:
+            print(f"Executing notebook for {src} -> {nb_path}", flush=True)
             nb = nbformat.v4.new_notebook()
             nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
-            ep = ExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
+            ep = LoggingExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
             try:
                 ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
             except Exception as e:
                 tb = traceback.format_exc()
                 if nb.cells:
                     nb.cells[0].outputs = [
-                        {
-                            "output_type": "error",
-                            "ename": type(e).__name__,
-                            "evalue": str(e),
-                            "traceback": tb.splitlines(),
-                        }
+                        nbformat.v4.new_output(
+                            output_type="error",
+                            ename=type(e).__name__,
+                            evalue=str(e),
+                            traceback=tb.splitlines(),
+                        )
                     ]
                     for cell in nb.cells[1:]:
                         cell.outputs = [
-                            {
-                                "output_type": "stream",
-                                "name": "stderr",
-                                "text": "previous cell failed to execute\n",
-                            }
+                            nbformat.v4.new_output(
+                                output_type="stream",
+                                name="stderr",
+                                text="previous cell failed to execute\n",
+                            )
                         ]
             nbformat.write(nb, nb_path)
         for idx, cell in enumerate(nb.cells, start=1):
@@ -640,7 +642,7 @@ class ChangeHandler(FileSystemEventHandler):
 
     def handle(self, path, is_directory):
         if not is_directory and path.endswith('.qmd') and '/_build/' not in path:
-            print(f"Change detected: {path}")
+            print(f"Change detected: {path}", flush=True)
             self.build()
             self.refresher.refresh()
 
@@ -657,7 +659,7 @@ class ChangeHandler(FileSystemEventHandler):
 def serve(dir: str = "_build", port: int = 8000):
     handler = SimpleHTTPRequestHandler
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
-    print(f"Serving {dir} at http://localhost:{port}")
+    print(f"Serving {dir} at http://localhost:{port}", flush=True)
     Path(dir).mkdir(parents=True, exist_ok=True)
     orig = Path.cwd()
     try:
@@ -667,7 +669,7 @@ def serve(dir: str = "_build", port: int = 8000):
         os.chdir(orig)
 
 
-def watch_and_serve():
+def watch_and_serve(no_browser: bool = False):
     build_all()
     port = 8000
     render_files = load_rendered_files()
@@ -680,12 +682,19 @@ def watch_and_serve():
         start_page = ""
     url = f"http://localhost:{port}/{start_page}"
 
-    print("Watching files:")
+    print("Watching files:", flush=True)
     for f in files_to_watch:
-        print(" ", f)
+        print(" ", f, flush=True)
 
     threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
-    refresher = BrowserReloader(url)
+    if no_browser:
+        class Dummy:
+            def refresh(self):
+                pass
+
+        refresher = Dummy()
+    else:
+        refresher = BrowserReloader(url)
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
     watched_dirs = {str(Path(f).parent) for f in files_to_watch}
@@ -708,8 +717,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--watch", action="store_true", help="Watch files and serve site"
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open a browser when using --watch",
+    )
     args = parser.parse_args()
     if args.watch:
-        watch_and_serve()
+        watch_and_serve(no_browser=args.no_browser)
     else:
         build_all()
