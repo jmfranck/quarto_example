@@ -138,20 +138,20 @@ def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[
                 tb = traceback.format_exc()
                 if nb.cells:
                     nb.cells[0].outputs = [
-                        {
-                            "output_type": "error",
-                            "ename": type(e).__name__,
-                            "evalue": str(e),
-                            "traceback": tb.splitlines(),
-                        }
+                        nbformat.v4.new_output(
+                            output_type="error",
+                            ename=type(e).__name__,
+                            evalue=str(e),
+                            traceback=tb.splitlines(),
+                        )
                     ]
                     for cell in nb.cells[1:]:
                         cell.outputs = [
-                            {
-                                "output_type": "stream",
-                                "name": "stderr",
-                                "text": "previous cell failed to execute\n",
-                            }
+                            nbformat.v4.new_output(
+                                output_type="stream",
+                                name="stderr",
+                                text="previous cell failed to execute\n",
+                            )
                         ]
             nbformat.write(nb, nb_path)
         for idx, cell in enumerate(nb.cells, start=1):
@@ -654,25 +654,24 @@ class ChangeHandler(FileSystemEventHandler):
         self.handle(event.dest_path, event.is_directory)
 
 
-def serve(dir: str = "_build", port: int = 8000):
-    handler = SimpleHTTPRequestHandler
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
-    print(f"Serving {dir} at http://localhost:{port}")
-    Path(dir).mkdir(parents=True, exist_ok=True)
-    orig = Path.cwd()
-    try:
-        os.chdir(dir)
-        httpd.serve_forever()
-    finally:
-        os.chdir(orig)
+def serve(thisdir: str = "_build", port: int = 8000):
+    class Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=thisdir, **kwargs)
+
+    httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    print(f"Serving {thisdir} at http://localhost:{port}")
+    Path(thisdir).mkdir(parents=True, exist_ok=True)
+    httpd.serve_forever()
 
 
-def watch_and_serve():
+def watch_and_serve(no_browser: bool = False):
     build_all()
     port = 8000
     render_files = load_rendered_files()
     include_map = build_include_map(render_files)
     files_to_watch = sorted(set(render_files) | set(include_map.keys()))
+    abs_watch = [str(Path(f).resolve()) for f in files_to_watch]
 
     if render_files:
         start_page = Path(render_files[0]).with_suffix(".html").as_posix()
@@ -681,15 +680,22 @@ def watch_and_serve():
     url = f"http://localhost:{port}/{start_page}"
 
     print("Watching files:")
-    for f in files_to_watch:
+    for f in abs_watch:
         print(" ", f)
 
-    threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
-    refresher = BrowserReloader(url)
+    threading.Thread(target=serve, kwargs={'thisdir': str(BUILD_DIR), 'port': port}, daemon=True).start()
+    if no_browser:
+        class Dummy:
+            def refresh(self):
+                pass
+
+        refresher = Dummy()
+    else:
+        refresher = BrowserReloader(url)
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
-    watched_dirs = {str(Path(f).parent) for f in files_to_watch}
-    watched_dirs.add('.')
+    watched_dirs = {str(Path(f).parent) for f in abs_watch}
+    watched_dirs.add(str(Path('.').resolve()))
     for d in sorted(watched_dirs):
         observer.schedule(handler, d, recursive=False)
     observer.start()
@@ -708,8 +714,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--watch", action="store_true", help="Watch files and serve site"
     )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open a browser when using --watch",
+    )
     args = parser.parse_args()
     if args.watch:
-        watch_and_serve()
+        watch_and_serve(no_browser=args.no_browser)
     else:
         build_all()
