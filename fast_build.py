@@ -656,17 +656,16 @@ class ChangeHandler(FileSystemEventHandler):
         self.handle(event.dest_path, event.is_directory)
 
 
+from functools import partial
+
+
 def serve(dir: str = "_build", port: int = 8000):
-    handler = SimpleHTTPRequestHandler
+    """Serve ``dir`` without changing the process working directory."""
+    handler = partial(SimpleHTTPRequestHandler, directory=str(dir))
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
     print(f"Serving {dir} at http://localhost:{port}", flush=True)
     Path(dir).mkdir(parents=True, exist_ok=True)
-    orig = Path.cwd()
-    try:
-        os.chdir(dir)
-        httpd.serve_forever()
-    finally:
-        os.chdir(orig)
+    httpd.serve_forever()
 
 
 def watch_and_serve(no_browser: bool = False):
@@ -686,7 +685,9 @@ def watch_and_serve(no_browser: bool = False):
     for f in files_to_watch:
         print(" ", f, flush=True)
 
-    threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
+    threading.Thread(
+        target=serve, kwargs={"dir": str(BUILD_DIR), "port": port}, daemon=True
+    ).start()
     if no_browser:
         class Dummy:
             def refresh(self):
@@ -697,10 +698,9 @@ def watch_and_serve(no_browser: bool = False):
         refresher = BrowserReloader(url)
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
-    watched_dirs = {str(Path(f).parent) for f in files_to_watch}
-    watched_dirs.add('.')
+    watched_dirs = {Path(f).parent.resolve() for f in files_to_watch}
     for d in sorted(watched_dirs):
-        observer.schedule(handler, d, recursive=False)
+        observer.schedule(handler, str(d), recursive=False)
     observer.start()
     try:
         while True:
