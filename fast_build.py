@@ -655,16 +655,14 @@ class ChangeHandler(FileSystemEventHandler):
 
 
 def serve(dir: str = "_build", port: int = 8000):
-    handler = SimpleHTTPRequestHandler
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
+    class Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=dir, **kwargs)
+
+    httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"Serving {dir} at http://localhost:{port}")
     Path(dir).mkdir(parents=True, exist_ok=True)
-    orig = Path.cwd()
-    try:
-        os.chdir(dir)
-        httpd.serve_forever()
-    finally:
-        os.chdir(orig)
+    httpd.serve_forever()
 
 
 def watch_and_serve(no_browser: bool = False):
@@ -673,6 +671,7 @@ def watch_and_serve(no_browser: bool = False):
     render_files = load_rendered_files()
     include_map = build_include_map(render_files)
     files_to_watch = sorted(set(render_files) | set(include_map.keys()))
+    abs_watch = [str(Path(f).resolve()) for f in files_to_watch]
 
     if render_files:
         start_page = Path(render_files[0]).with_suffix(".html").as_posix()
@@ -681,7 +680,7 @@ def watch_and_serve(no_browser: bool = False):
     url = f"http://localhost:{port}/{start_page}"
 
     print("Watching files:")
-    for f in files_to_watch:
+    for f in abs_watch:
         print(" ", f)
 
     threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
@@ -695,8 +694,8 @@ def watch_and_serve(no_browser: bool = False):
         refresher = BrowserReloader(url)
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
-    watched_dirs = {str(Path(f).parent) for f in files_to_watch}
-    watched_dirs.add('.')
+    watched_dirs = {str(Path(f).parent) for f in abs_watch}
+    watched_dirs.add(str(Path('.').resolve()))
     for d in sorted(watched_dirs):
         observer.schedule(handler, d, recursive=False)
     observer.start()
