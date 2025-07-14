@@ -127,11 +127,15 @@ def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[
         nb_hash = hashlib.md5(combined).hexdigest()
         nb_path = NOTEBOOK_CACHE_DIR / f"{nb_hash}.ipynb"
         if nb_path.exists():
+            print(f"Reading cached output for {src} from {nb_path}!")
             nb = nbformat.read(nb_path, as_version=4)
         else:
+            print(f"Generating notebook for {src} at {nb_path}:")
             nb = nbformat.v4.new_notebook()
             nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
-            ep = ExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
+            ep = LoggingExecutePreprocessor(
+                    kernel_name="python3", timeout=300, allow_errors=True
+                    )
             try:
                 ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
             except Exception as e:

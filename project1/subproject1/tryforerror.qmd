@@ -1,161 +1,52 @@
-### Save amplitude-adjusted dataset {#sec:schmidtRegul240418}
+### A control
 
-Then go back to the code in @sec:schmidtRegul240215
-~~and feed it the second function for the second dimension, to just get the 2D ILT~~
-looking back at the code, realize that we keep re-doing the gain correct, and I should just save some postprocessed data that is ready for ILT
-<obs time="4/18/24 16:30">this is now saved</obs>
-
-```{python}
-%reset -f
-print("hello world!!")
-```
-
-### (dipolar ev. time) × T₂
-
-~~actually, it does make sense to first copy the $Time \rightarrow$ distance regularization from the most recent code here, and then run distance regularization 1.5D, to see how the distances depend on $\tau_2$ -- again, take the strategy of running an array of $\alpha$ $\rightarrow$ start by setting $\alpha=0.5$~~
-First, we ended up regularizing along the $T_2$ decay, not distance
-<obs time="4/19/24 15:21">end up using $\alpha=0.01$ -- this looks a bit interesting, and realize this is different vs. what we did before, b/c I have not FT'd along one dimension</obs>
+This works fine because there is no nesting
 <err>
-  <obs time="4/18/24 16:48">gives an error about not under the axis, which is confusing b/c I thought we used nnls exactly this way in the $\tau_2$ dimension before</obs>
-  come back and compare to the [regularization of $T_2$ data](project/2D_reg/24feb15.html#sec:schmidtRegul240215) code where we did $\tau_2$ regularization in order to debug
-  <obs time="4/19/24 12:21">same error</obs>
-  see if I need to be on `alec_BRD` branch
-  <obs time="4/19/24 12:28">the `store_uncompressed_kernel` argument seems to only be on the master branch</obs>
-  merge master branch into `alec_BRD`
-  <obs time="4/19/24 12:30">this gives same error</obs>
-  go back and pull the code from [regularization of $T_2$ data](project/2D_reg/24feb15.html#sec:schmidtRegul240215), and make sure I can still run it!
-  <obs time="4/19/24 13:17">at this point, I have figured out that the problem is that nnls is using `self` to reference the nddata class without generating circular imports. This is a problem, because sometimes I have, e.g., `nddata_hdf5` (which inherits) instead, so both when checking the type at the top, and using the `__class__` constructor later on in the function, it's doing the wrong thing. The problem is then that `super` doesn't work -- I think because the code in this module isn't nested inside a class function.</obs>
-  <obs time="4/19/24 15:20">after chatGPT, find that I need to just pass the class def to the function -- can wrap the function in order to do this</obs>
-</err>
-<err>
-  <obs time="4/18/24 16:38">here I find myself changing the units of the data to μs</obs>
-  instead, just make sure the saving code above uses units of μs
+  This text is inside an err block with no nesting
+  <obs time="7/14/25 10:19" author="JF">and it seems fine</obs>
 
 </err>
 
-```{python}
-print("hello world!")
-```
+### Demonstration of a problem
 
-### (distance) × (T₂ rel. time) {#sec:schmidtDistanceCorrRelTime}
-
-Go back in git history to what I had early on 4/19 with TS and run that temp.py, which should be the full 1.5 D regularization that I wanted to run
-<obs time="4/22/24 12:10">came back here</obs>
-<obs time="4/22/24 12:36">having to do some debugging w/ this because it takes a while to run each time</obs>
-<err>
-  <obs time="7/10/25 15:37" author="JF">this is not working, I think because of more recent upgrades?  Notes seem to imply it was working</obs>
-  get this to work first:
-  ~~start by jumping back to code on 4/22/24~~
-  just try to run
-  <obs time="7/10/25 17:00" author="JF">we can slice out initial portion and get it to run, but we notice that both here, and in the 1D regularization (@sec:schmidtRegul240404), the distances don't match what Thomas says they should be</obs>
-  first, finish debugging the error we encounter when things are not sliced
-  <obs time="7/10/25 17:14" author="JF">this works</obs>
-  then, proceed to see if the 2D (@sec:schmidtFull2D) works
-
-  taking a fresh look at the 2D data, the changes between gain levels are somewhat abrupt
-  <obs time="7/10/25 17:19" author="JF">realized this is actually from the fact that it's doing nearest interpolation, and there are large jumps in time</obs>
-  see that we can use our distance regularization to get the data from his fake data demo (@sec:schmidtFakeDataDemo), so we are reassured that our kernel generates distances with the correct value
-
-</err>
-
-```{python}
-#| eval: false
-#| echo: true
-%reset -f
-print("hello world!")
-```
-
-~~I think that I can do the array of $\alpha$ automatically in parallel along with the 1.5 D parallelization -- try this~~
-<obs time="4/22/24 12:52">skip this</obs>
-
-### 2D (distance × T₂) {#sec:schmidtFull2D}
-
-then incorporate the $\tau_2 \rightarrow T_2$ regularization we had done in @sec:schmidtRegul240215
+Then I try to do some stuff and get some errors
 
 <err>
-  <obs time="4/22/24 12:55">I have what I think is decent 2D code, but I am getting a segfault, and not sure why this would be occuring</obs>
-  re-run setup.py just so I'm sure of what's going on
-  <obs time="4/22/24 12:59">did this, no change</obs>
-  try to decrease `default_cut`, in case this is essentially a memory error
-  <obs time="4/22/24 13:00">this reduces the #SVs to 12 and 2, so should run much faster, and with less memory</obs>
-  <obs time="4/22/24 13:01">this still gets a segfault</obs>
-  double-check that the 2D examples are still working the way that they should be
-  <obs time="4/26/24 15:46">back here -- checked out `alec_BRD`</obs>
-  run `demos/ILT_demo_231121` in `pyspecdata` `alec_BRD` branch
-  <obs time="4/26/24 15:59">this did run</obs>
-  look at the log to find the lambda used, and then just run with that lambda
-  <obs time="4/26/24 16:03">this also works</obs>
-  then add a debugging line on line 420 to show data type and shape being fed to `nnls_regularized` (for the 1D which works, vs. the 2D which does not)
-  <obs time="4/26/24 16:08">get this result: </obs>
-
-  ```
-  DEBUG: I'm preparing to call nnls_regularized with kernel dtype float64 and shape (81, 2500) data dtype float64 and shape (81,)
-  --> nnls.py(57):pyspecdata.nnls     nnls_regularized 2024-04-26 16:06:44,001
-  DEBUG: isfortran result False False
-  --> nnls.py(429):pyspecdata.matrix_math                 nnls 2024-04-26 16:06:57,851
-  DEBUG: coming back from fortran, residual type is <class 'float'>
-  ```
-
-  be sure to update the `ILT_demo_231121.py` file after editing the notebook
-  <obs>$\checkmark$</obs>
-  run the code below, which is the one that segfaults, and see what the difference in the data is
-  <obs time="4/26/24 16:17">I notice that second (fit) dimension of the kernel ends up being very big</obs>
-  <obs time="4/26/24 16:19">I also notice it returns `isfortran false false` from nnls.py in the main directory</obs>
-  figure out if that is the wrapper of the compiled module?
-  <obs time="4/26/24 16:25">yes, what is now line 86 of `pyspecdata/nnls.py`</obs>
-  talking about this, figure out exactly how much memory the kernel uses
-  <obs time="4/26/24 16:27">it's only 92 MB</obs>
-  add debugging `write(*,*) "debug string"` statements inside `nnls/nnls_regularized.f90`
-  <obs time="4/26/24 16:37">I realize what the problem is -- the matrix that it's trying to construct is 500,000×500,000 (plus a few on one side), which would be more than a 1 TB</obs>
-  Just try the BRD routine instead of trying to regularize
-  <obs time="4/26/24 16:41">no, the BRD does actually use this `nnls_regularized`</obs>
-  <obs time="9/10 14:30">coming back and reviewing with Thomas -- the origin of this problem is the fact that `nnls_regularized` does the regularization by stacking the kernel with an identity matrix -- and because only one dimension is compressed, this identity matrix is huge</obs>
-  <obs time="9/10 14:45">reviewing in my notes, $\tilde{K}$ is tall and not wide, so stacking with identity should not be the problem. I think that we are maybe uncompressing before we do this.</obs>
-  I really don't want to sacrifice on the size of my basis. At this point, I'm thinking about (1) using this cvxopt library that they were using in the deerlab or (2) re-reading [@venkataramanan2002solving] where they talk about the algorithm, to see how this business of stacking could be avoided. I think the most straightforward thing to do is to recognizee that the stacking is a hack, and there should be a programmatic way around it. There should be a way to do the Lawson-Hansen with regularization
+  This is at the top of the main error block that has other error blocks nested inside it
+  <obs time="7/14/25 10:20" author="JF">this shows up in an err block, but a nested one should start after it, and it doesn't</obs>
 
 <err>
-  we can also consider trying to decrease the size of the fit basis first, by asking if the size primarily comes from the dipolar evolution (which I think we can't just decrease) or the relaxation times
-
-  then by asking if maybe a linear sampling of the dipolar evolution is not the way to go -- that a log spacing, etc, would give a better fit with less basis elements (maybe TK can check out how the distances in the basis set for dipolar evolution are spaced -- is it linear, logarathmic, or some other scheme)
+  This is inside the parent err block
+  <obs time="7/14/25 10:18" author="JF">and before that sentence is the first place I see an err tag</obs>
+  <obs time="7/14/25 10:20" author="JF">and it's repeated!!</obs>
 
 </err>
 <err>
-  <obs time="4/26/24 16:57">there is a paper by Zdunek, but I think that I'm missing something from [@venkataramanan2002solving]</obs>
-  really start by looking back at [@venkataramanan2002solving], then return above
+  This is inside a second nested error block
+  <obs time="7/14/25 10:14" author="JF">It does not show up as an error block!</obs>
 
 </err>
-
-  if needed, read through my notes in @sec:AB2DRMvetOct19, which describes the status of the multi-D regularization from when I upgraded the code when working on the $^2$H paper.
+  This is back inside the parent err block
+  <obs time="7/14/25 10:16" author="JF">but it shows up in the main text!</obs>
 </err>
-run with the `venk_BRD` updates that actually use the SLB algorithm
-<obs time="7/11/25 21:57" author="JF">after setting l to BRD, it's running in temp.py, and looks very different than expected</obs>
-get to a point where we're happy we're doing the best possible with the BRD
+This comment is back in the main text
+<obs time="7/14/25 10:14" author="JF">make some observations</obs>
 
 <err>
-  try to scale the data so that the noise has norm of 1
-  <obs time="7/12/25 19:43" author="JF">it still looks over-regularized to me, and the $T_2$ isn't helping to separate the distance components</obs>
-  <obs time="7/12/25 19:46" author="JF">also I see distinct oscillations in the residual</obs>
-  get colormap from `nano_collab/yerdon/jf_diffusion_nnls.tex` working to better see what's up, because that would just generally help
+  this, interestingly, does not get repeated
+  <obs time="7/12/25 19:43" author="JF">I observe it does not!</obs>
 
-  make use of the KKT-based regularization a different flag from the actual BRD, so that I can manually turn down the $\lambda$.
+  this sentence gets repeated
   
-  seems to be a discrepancy where we see a $T_2$ variation of the background when using the FT, but not the Fresnel kernel regularization
-  return to looking at data that's FT'd along distance, and run that with BRD,
-  and also compare the residuals
+  this also gets repeated 
 
 </err>
-<br/>
-```{python}
-print("hello world!")
-```
-<br/>
-come back and get rid of the `default_cut` argument once I have the 2D reg working
 
-I think that I can do the array of $\alpha$ automatically in parallel along with the 2 D regularization -- try this
+This is some more main text
 
 <err>
-  <obs time="4/18/24 16:15">talking about this, he mentions that data is originally complex</obs>
-  **come back to this: this is not clear to me b/c I don't remember phasing**
+  And this is a final error block
 
 </err>
-figure out why `alec_BRD` isn't merged into master
+
+<obs time="7/14/25 10:23" author="JF">I see no repetition in the final error block</obs>
