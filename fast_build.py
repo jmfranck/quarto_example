@@ -127,13 +127,11 @@ def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[
         nb_hash = hashlib.md5(combined).hexdigest()
         nb_path = NOTEBOOK_CACHE_DIR / f"{nb_hash}.ipynb"
         if nb_path.exists():
-            print(f"Code in {src} was previously cached in {nb_path}", flush=True)
             nb = nbformat.read(nb_path, as_version=4)
         else:
-            print(f"Executing notebook for {src} -> {nb_path}", flush=True)
             nb = nbformat.v4.new_notebook()
             nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
-            ep = LoggingExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
+            ep = ExecutePreprocessor(kernel_name="python3", timeout=300, allow_errors=True)
             try:
                 ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
             except Exception as e:
@@ -642,7 +640,7 @@ class ChangeHandler(FileSystemEventHandler):
 
     def handle(self, path, is_directory):
         if not is_directory and path.endswith('.qmd') and '/_build/' not in path:
-            print(f"Change detected: {path}", flush=True)
+            print(f"Change detected: {path}")
             self.build()
             self.refresher.refresh()
 
@@ -656,16 +654,17 @@ class ChangeHandler(FileSystemEventHandler):
         self.handle(event.dest_path, event.is_directory)
 
 
-from functools import partial
-
-
 def serve(dir: str = "_build", port: int = 8000):
-    """Serve ``dir`` without changing the process working directory."""
-    handler = partial(SimpleHTTPRequestHandler, directory=str(dir))
+    handler = SimpleHTTPRequestHandler
     httpd = ThreadingHTTPServer(("0.0.0.0", port), handler)
-    print(f"Serving {dir} at http://localhost:{port}", flush=True)
+    print(f"Serving {dir} at http://localhost:{port}")
     Path(dir).mkdir(parents=True, exist_ok=True)
-    httpd.serve_forever()
+    orig = Path.cwd()
+    try:
+        os.chdir(dir)
+        httpd.serve_forever()
+    finally:
+        os.chdir(orig)
 
 
 def watch_and_serve(no_browser: bool = False):
@@ -681,13 +680,11 @@ def watch_and_serve(no_browser: bool = False):
         start_page = ""
     url = f"http://localhost:{port}/{start_page}"
 
-    print("Watching files:", flush=True)
+    print("Watching files:")
     for f in files_to_watch:
-        print(" ", f, flush=True)
+        print(" ", f)
 
-    threading.Thread(
-        target=serve, kwargs={"dir": str(BUILD_DIR), "port": port}, daemon=True
-    ).start()
+    threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
     if no_browser:
         class Dummy:
             def refresh(self):
@@ -698,9 +695,10 @@ def watch_and_serve(no_browser: bool = False):
         refresher = BrowserReloader(url)
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
-    watched_dirs = {Path(f).parent.resolve() for f in files_to_watch}
+    watched_dirs = {str(Path(f).parent) for f in files_to_watch}
+    watched_dirs.add('.')
     for d in sorted(watched_dirs):
-        observer.schedule(handler, str(d), recursive=False)
+        observer.schedule(handler, d, recursive=False)
     observer.start()
     try:
         while True:

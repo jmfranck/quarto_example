@@ -39,13 +39,3 @@ quarto render project1/example.qmd --no-execute
 ```
 
 The resulting HTML will be placed in the `_site` directory.
-
-## Fast Build with Watch Mode
-
-Use `fast_build.py` to build the site with Pandoc. Running it with `--watch` automatically rebuilds when watched files change and serves the output. When building in a headless environment, add `--no-browser`.
-
-```bash
-python3 fast_build.py --watch --no-browser
-```
-
-When a file such as `project1/subproject1/tasks.qmd` is modified, the script prints a "Change detected" message and refreshes the HTML in `_build` without restarting.
