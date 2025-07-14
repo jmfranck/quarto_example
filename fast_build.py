@@ -654,14 +654,14 @@ class ChangeHandler(FileSystemEventHandler):
         self.handle(event.dest_path, event.is_directory)
 
 
-def serve(dir: str = "_build", port: int = 8000):
+def serve(thisdir: str = "_build", port: int = 8000):
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=dir, **kwargs)
+            super().__init__(*args, directory=thisdir, **kwargs)
 
     httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"Serving {dir} at http://localhost:{port}")
-    Path(dir).mkdir(parents=True, exist_ok=True)
+    print(f"Serving {thisdir} at http://localhost:{port}")
+    Path(thisdir).mkdir(parents=True, exist_ok=True)
     httpd.serve_forever()
 
 
@@ -683,7 +683,7 @@ def watch_and_serve(no_browser: bool = False):
     for f in abs_watch:
         print(" ", f)
 
-    threading.Thread(target=serve, kwargs={'dir': str(BUILD_DIR), 'port': port}, daemon=True).start()
+    threading.Thread(target=serve, kwargs={'thisdir': str(BUILD_DIR), 'port': port}, daemon=True).start()
     if no_browser:
         class Dummy:
             def refresh(self):
