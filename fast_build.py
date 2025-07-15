@@ -251,8 +251,8 @@ def replace_refs(path, anchors):
 
 BUILD_DIR = Path("_build")
 BODY_TEMPLATE = Path("_template/body-only.html").resolve()
-PANDOC_TEMPLATE = Path("_template/pandoc__template.html").resolve()
-NAV_TEMPLATE = Path("_template/nav__template.html").resolve()
+PANDOC_TEMPLATE = Path("_template/pandoc_template.html").resolve()
+NAV_TEMPLATE = Path("_template/nav_template.html").resolve()
 MATHJAX_DIR = Path("_template/mathjax").resolve()
 
 

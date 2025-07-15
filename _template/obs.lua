@@ -92,108 +92,61 @@ end
 -- Convert <err>...</err> blocks spanning multiple paragraphs into a styled Div
 function Blocks(blocks)
   local out = pandoc.List{}
-  local i = 1
-  while i <= #blocks do
-    local blk = blocks[i]
-    local handled = false
-    if blk.t == 'Para' then
-      local inlines = blk.content
-      for pos, inline in ipairs(inlines) do
-        if inline.t == 'RawInline' and inline.format == 'html' and inline.text == '<err>' then
-          -- capture text before the <err> tag
-          if pos > 1 then
-            local before = pandoc.List{}
-            for k = 1, pos - 1 do
-              before:insert(inlines[k])
-            end
-            if #before > 0 then
-              out:insert(pandoc.Para(before))
-            end
-          end
+  local stack = {}
 
-          local inner = pandoc.List{}
-          local closing_in_para = false
-          local rest = pandoc.List{}
-          local after = pandoc.List{}
-          local j = pos + 1
-          while j <= #inlines do
-            local cur = inlines[j]
-            if cur.t == 'RawInline' and cur.format == 'html' and cur.text == '</err>' then
-              closing_in_para = true
-              break
-            else
-              rest:insert(cur)
-            end
-            j = j + 1
+  local function current_container()
+    if #stack > 0 then
+      return stack[#stack].content
+    else
+      return out
+    end
+  end
+
+  local function start_err()
+    table.insert(stack, {content = pandoc.List{}})
+  end
+
+  local function finish_err()
+    local entry = table.remove(stack)
+    if not entry then
+      return
+    end
+    local header = pandoc.Para({
+      pandoc.Span({pandoc.Str('DEBUG:')}, pandoc.Attr('', {}, {style = 'color:grey;'}))
+    })
+    local body = pandoc.Div(entry.content, pandoc.Attr('', {}, {style = 'margin:10px; border:0px;'}))
+    local div = pandoc.Div({header, body}, pandoc.Attr('', {}, {style = 'margin:0px; border:1px solid grey; padding:0px;'}))
+    current_container():insert(div)
+  end
+
+  for _, blk in ipairs(blocks) do
+    if blk.t == 'Para' then
+      local buffer = pandoc.List{}
+      for _, inline in ipairs(blk.content) do
+        if inline.t == 'RawInline' and inline.format == 'html' and inline.text == '<err>' then
+          if #buffer > 0 then
+            current_container():insert(pandoc.Para(buffer))
+            buffer = pandoc.List{}
           end
-          if #rest > 0 then
-            inner:insert(pandoc.Para(rest))
+          start_err()
+        elseif inline.t == 'RawInline' and inline.format == 'html' and inline.text == '</err>' then
+          if #buffer > 0 then
+            stack[#stack].content:insert(pandoc.Para(buffer))
+            buffer = pandoc.List{}
           end
-          if closing_in_para then
-            if j + 1 <= #inlines then
-              for k = j + 1, #inlines do
-                after:insert(inlines[k])
-              end
-            end
-          else
-            i = i + 1
-            while i <= #blocks do
-              local cur = blocks[i]
-              local closing_found = false
-              if cur.t == 'Para' then
-                local before_close = pandoc.List{}
-                for cpos, cin in ipairs(cur.content) do
-                  if cin.t == 'RawInline' and cin.format == 'html' and cin.text == '</err>' then
-                    if cpos > 1 then
-                      for k = 1, cpos - 1 do
-                        before_close:insert(cur.content[k])
-                      end
-                      if #before_close > 0 then
-                        inner:insert(pandoc.Para(before_close))
-                      end
-                    end
-                    if cpos + 1 <= #cur.content then
-                      for k = cpos + 1, #cur.content do
-                        after:insert(cur.content[k])
-                      end
-                    end
-                    closing_found = true
-                    break
-                  else
-                    before_close:insert(cin)
-                  end
-                end
-                if not closing_found and #before_close > 0 then
-                  inner:insert(pandoc.Para(before_close))
-                end
-              end
-              if closing_found then
-                break
-              else
-                inner:insert(cur)
-              end
-              i = i + 1
-            end
-          end
-          local header = pandoc.Para({
-            pandoc.Span({pandoc.Str('DEBUG:')}, pandoc.Attr('', {}, {style = 'color:grey;'}))
-          })
-          local body = pandoc.Div(inner, pandoc.Attr('', {}, {style = 'margin:10px; border:0px;'}))
-          local div = pandoc.Div({header, body}, pandoc.Attr('', {}, {style = 'margin:0px; border:1px solid grey; padding:0px;'}))
-          out:insert(div)
-          if #after > 0 then
-            out:insert(pandoc.Para(after))
-          end
-          handled = true
-          break
+          finish_err()
+        else
+          buffer:insert(inline)
         end
       end
+      if #buffer > 0 then
+        current_container():insert(pandoc.Para(buffer))
+      end
+    else
+      current_container():insert(blk)
     end
-    if not handled then
-      out:insert(blk)
-    end
-    i = i + 1
   end
+
   return out
 end
 
