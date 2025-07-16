@@ -403,7 +403,10 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
         "--embed-resources",
         "--lua-filter",
         os.path.relpath(BUILD_DIR / "obs.lua", dest.parent),
-        f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}",
+        "--filter",
+        "pandoc-crossref",
+        "--citeproc",
+        f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML",
         "--template",
         os.path.relpath(template, dest.parent),
         "-o",
@@ -575,8 +578,8 @@ def build_all():
     if "project" in cfg and "render" in cfg["project"]:
         cfg["project"]["render"] = []
     (BUILD_DIR / "_quarto.yml").write_text(yaml.safe_dump(cfg))
-    if Path("obs.lua").exists():
-        shutil.copy2("obs.lua", BUILD_DIR / "obs.lua")
+    if Path("_template/obs.lua").exists():
+        shutil.copy2("_template/obs.lua", BUILD_DIR / "obs.lua")
     render_files = load_rendered_files()
     bibliography, csl = load_bibliography_csl()
     include_map = build_include_map(render_files)
