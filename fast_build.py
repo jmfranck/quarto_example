@@ -22,6 +22,9 @@ import nbformat
 from nbconvert.preprocessors import ExecutePreprocessor
 from nbconvert.preprocessors.execute import NotebookClient
 import html as html_lib
+from pygments import highlight
+from pygments.lexers import PythonLexer
+from pygments.formatters import HtmlFormatter
 
 
 class LoggingExecutePreprocessor(ExecutePreprocessor):
@@ -114,10 +117,18 @@ def outputs_to_html(outputs: list[dict]) -> str:
 NOTEBOOK_CACHE_DIR = Path("_nbcache")
 
 
-def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[str, int], str]:
-    """Run code blocks as Jupyter notebooks with caching."""
+def execute_code_blocks(
+    blocks: dict[str, list[tuple[str, str]]]
+) -> tuple[dict[tuple[str, int], str], dict[tuple[str, int], str]]:
+    """Run code blocks as Jupyter notebooks with caching.
+
+    Returns a tuple ``(outputs, code_map)`` where ``outputs`` maps each
+    ``(source file, index)`` to the executed HTML output and ``code_map`` maps
+    the same key to the original code string.
+    """
     NOTEBOOK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    results: dict[tuple[str, int], str] = {}
+    outputs: dict[tuple[str, int], str] = {}
+    code_map: dict[tuple[str, int], str] = {}
     for src, cells in blocks.items():
         if not cells:
             continue
@@ -160,8 +171,9 @@ def execute_code_blocks(blocks: dict[str, list[tuple[str, str]]]) -> dict[tuple[
             nbformat.write(nb, nb_path)
         for idx, cell in enumerate(nb.cells, start=1):
             html = outputs_to_html(cell.get("outputs", []))
-            results[(src, idx)] = html
-    return results
+            outputs[(src, idx)] = html
+            code_map[(src, idx)] = codes[idx - 1]
+    return outputs, code_map
 
 
 def build_include_map(render_files):
@@ -542,11 +554,25 @@ def postprocess_html(html_path: Path):
     html_path.write_text(lxml_html.tostring(root, encoding="unicode"))
 
 
-def substitute_code_placeholders(html_path: Path, outputs: dict[tuple[str, int], str]):
-    """Replace script placeholders in ``html_path`` using executed outputs."""
+def substitute_code_placeholders(
+    html_path: Path,
+    outputs: dict[tuple[str, int], str],
+    codes: dict[tuple[str, int], str],
+) -> None:
+    """Replace script placeholders in ``html_path`` using executed outputs and
+    embed syntax highlighted source code.
+    """
     parser = lxml_html.HTMLParser(encoding="utf-8")
     tree = lxml_html.parse(str(html_path), parser)
     root = tree.getroot()
+    formatter = HtmlFormatter()
+    head = root.xpath("//head")
+    if head and not root.xpath('//style[@id="pygments-style"]'):
+        style = formatter.get_style_defs('.highlight')
+        style_node = lxml_html.fragment_fromstring(
+            f'<style id="pygments-style">{style}</style>', create_parent=False
+        )
+        head[0].append(style_node)
     changed = False
     for node in list(root.xpath("//div[@data-script][@data-index]")):
         src = node.get("data-script")
@@ -555,7 +581,11 @@ def substitute_code_placeholders(html_path: Path, outputs: dict[tuple[str, int],
         except ValueError:
             idx = 0
         html = outputs.get((src, idx), "")
-        frags = lxml_html.fragments_fromstring(html) if html else []
+        code = codes.get((src, idx), "")
+        code_html = highlight(code, PythonLexer(), formatter)
+        frags = lxml_html.fragments_fromstring(code_html) + (
+            lxml_html.fragments_fromstring(html) if html else []
+        )
         parent = node.getparent()
         if parent is None:
             continue
@@ -613,11 +643,11 @@ def build_all():
         html_file = (BUILD_DIR / page["file"]).with_suffix(".html")
         add_navigation(html_file, pages, page["file"])
 
-    outputs = execute_code_blocks(code_blocks)
+    outputs, code_map = execute_code_blocks(code_blocks)
     for f in files:
         html_file = (BUILD_DIR / f).with_suffix(".html")
         if html_file.exists():
-            substitute_code_placeholders(html_file, outputs)
+            substitute_code_placeholders(html_file, outputs, code_map)
 
 
 class BrowserReloader:
