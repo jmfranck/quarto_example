@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import subprocess
+import sys
 import time
 import traceback
 from pathlib import Path
@@ -17,6 +18,7 @@ import yaml
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 import selenium
 from jinja2 import Environment, FileSystemLoader
 import nbformat
@@ -59,6 +61,36 @@ if not shutil.which("pandoc"):
     quarto_pandoc = Path("/opt/quarto/bin/tools/x86_64/pandoc")
     if quarto_pandoc.exists():
         os.environ["PATH"] += os.pathsep + str(quarto_pandoc.parent)
+
+# Dependency checks
+if shutil.which("pandoc") is None:
+    print(
+        "Pandoc not found.\n"
+        "Install it from https://pandoc.org/installing.html\n"
+        "  • Debian/Ubuntu:  sudo apt-get install pandoc\n"
+        "  • macOS (Homebrew):  brew install pandoc"
+    )
+    sys.exit(1)
+
+options = webdriver.ChromeOptions()
+options.add_argument("--headless")
+try:
+    webdriver.Chrome(options=options).quit()
+except WebDriverException:
+    print(
+        "ChromeDriver not found or incompatible.\n"
+        "See Selenium's driver installation docs:\n"
+        "  https://www.selenium.dev/documentation/webdriver/getting_started/install_drivers/\n"
+        "Ensure the driver is on your PATH or provide its location to webdriver.Chrome().",
+    )
+    sys.exit(1)
+
+if shutil.which("pandoc-crossref") is None:
+    print(
+        "pandoc-crossref not found. Install it for cross-references:\n"
+        "  https://github.com/lierdakil/pandoc-crossref"
+    )
+    sys.exit(1)
 
 include_pattern = re.compile(
     r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}"
@@ -158,7 +190,7 @@ def execute_code_blocks(
             nb = nbformat.v4.new_notebook()
             nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
             ep = LoggingExecutePreprocessor(
-                kernel_name="python3", timeout=300, allow_errors=True
+                kernel_name="python3", timeout=10800, allow_errors=True
             )
             try:
                 ep.preprocess(
@@ -454,9 +486,21 @@ def render_file(
         dest.with_suffix(".html").name,
     ]
     if bibliography:
-        args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
+        bib_path = Path(os.path.expanduser(bibliography))
+        if not bib_path.is_absolute():
+            bib_path = PROJECT_ROOT / bib_path
+        if not bib_path.exists():
+            raise FileNotFoundError(
+                f"Bibliography file {bibliography} not found"
+            )
+        args += ["--bibliography", os.path.relpath(bib_path, dest.parent)]
     if csl:
-        args += ["--csl", os.path.relpath(csl, dest.parent)]
+        csl_path = Path(os.path.expanduser(csl))
+        if not csl_path.is_absolute():
+            csl_path = PROJECT_ROOT / csl_path
+        if not csl_path.exists():
+            raise FileNotFoundError(f"CSL file {csl} not found")
+        args += ["--csl", os.path.relpath(csl_path, dest.parent)]
     try:
         subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
     except subprocess.CalledProcessError as e:
