@@ -85,12 +85,12 @@ except WebDriverException:
     )
     sys.exit(1)
 
-HAS_PANDOC_CROSSREF = shutil.which("pandoc-crossref") is not None
-if not HAS_PANDOC_CROSSREF:
+if shutil.which("pandoc-crossref") is None:
     print(
         "pandoc-crossref not found. Install it for cross-references:\n"
         "  https://github.com/lierdakil/pandoc-crossref"
     )
+    sys.exit(1)
 
 include_pattern = re.compile(
     r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}"
@@ -474,6 +474,8 @@ def render_file(
         "--embed-resources",
         "--lua-filter",
         os.path.relpath(BUILD_DIR / "obs.lua", dest.parent),
+        "--filter",
+        "pandoc-crossref",
         "--citeproc",
         (
             f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML"
@@ -483,12 +485,14 @@ def render_file(
         "-o",
         dest.with_suffix(".html").name,
     ]
-    if HAS_PANDOC_CROSSREF:
-        args += ["--filter", "pandoc-crossref"]
-    if bibliography and Path(bibliography).exists():
+    if bibliography:
+        bib_path = Path(bibliography)
+        if not bib_path.exists():
+            raise FileNotFoundError(f"Bibliography file {bibliography} not found")
         args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
-    if csl and Path(csl).exists():
-        args += ["--csl", os.path.relpath(csl, dest.parent)]
+    if not csl or not Path(csl).exists():
+        raise FileNotFoundError(f"CSL file {csl} not found")
+    args += ["--csl", os.path.relpath(csl, dest.parent)]
     try:
         subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
     except subprocess.CalledProcessError as e:
