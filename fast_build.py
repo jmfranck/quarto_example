@@ -459,6 +459,14 @@ def mirror_and_modify(files, anchors, roots):
 PROJECT_ROOT = Path(".").resolve()
 
 
+def resolve_project_path(p: str) -> Path:
+    """Return absolute path for ``p`` relative to project root."""
+    path = Path(os.path.expanduser(p))
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
 def render_file(
     src: Path, dest: Path, fragment: bool, bibliography=None, csl=None
 ):
@@ -486,13 +494,15 @@ def render_file(
         dest.with_suffix(".html").name,
     ]
     if bibliography:
-        bib_path = Path(bibliography)
+        bib_path = resolve_project_path(bibliography)
         if not bib_path.exists():
             raise FileNotFoundError(f"Bibliography file {bibliography} not found")
-        args += ["--bibliography", os.path.relpath(bibliography, dest.parent)]
-    if not csl or not Path(csl).exists():
-        raise FileNotFoundError(f"CSL file {csl} not found")
-    args += ["--csl", os.path.relpath(csl, dest.parent)]
+        args += ["--bibliography", os.path.relpath(bib_path, dest.parent)]
+    if csl:
+        csl_path = resolve_project_path(csl)
+        if not csl_path.exists():
+            raise FileNotFoundError(f"CSL file {csl} not found")
+        args += ["--csl", os.path.relpath(csl_path, dest.parent)]
     try:
         subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
     except subprocess.CalledProcessError as e:
