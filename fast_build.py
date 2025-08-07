@@ -12,6 +12,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
 import shutil
 import yaml
+
 # use a polling observer for wider compatibility
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
@@ -40,9 +41,13 @@ class LoggingExecutePreprocessor(ExecutePreprocessor):
             assert self.kc
             info_msg = self.wait_for_reply(self.kc.kernel_info())
             assert info_msg
-            self.nb.metadata["language_info"] = info_msg["content"]["language_info"]
+            self.nb.metadata["language_info"] = info_msg["content"][
+                "language_info"
+            ]
             for index, cell in enumerate(self.nb.cells):
-                print(f"Executing cell {index + 1}/{cell_count}...", flush=True)
+                print(
+                    f"Executing cell {index + 1}/{cell_count}...", flush=True
+                )
                 self.preprocess_cell(cell, resources, index)
         self.set_widgets_metadata()
 
@@ -55,13 +60,17 @@ if not shutil.which("pandoc"):
     if quarto_pandoc.exists():
         os.environ["PATH"] += os.pathsep + str(quarto_pandoc.parent)
 
-include_pattern = re.compile(r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}")
+include_pattern = re.compile(
+    r"\{\{\s*<\s*(include|embed)\s+([^>\s]+)\s*>\s*\}\}"
+)
 # Python code block pattern
 code_pattern = re.compile(r"```\{python[^}]*\}\n(.*?)```", re.DOTALL)
 
 # Collect anchor definitions {#sec:id}, {#fig:id}, {#tab:id}
 anchor_pattern = re.compile(r"\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}")
-heading_pattern = re.compile(r"^(#+)\s+(.*?)\s*\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}")
+heading_pattern = re.compile(
+    r"^(#+)\s+(.*?)\s*\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}"
+)
 
 
 def load_rendered_files():
@@ -105,12 +114,16 @@ def outputs_to_html(outputs: list[dict]) -> str:
                 src = f"data:image/jpeg;base64,{data['image/jpeg']}"
                 parts.append(f"<img src='{src}'/>")
             elif "text/plain" in data:
-                parts.append(f"<pre>{html_lib.escape(data['text/plain'])}</pre>")
+                parts.append(
+                    f"<pre>{html_lib.escape(data['text/plain'])}</pre>"
+                )
         elif typ == "error":
             tb = "\n".join(out.get("traceback", []))
             if not tb:
                 tb = f"{out.get('ename', '')}: {out.get('evalue', '')}"
-            parts.append(f"<pre style='color:red;'>{html_lib.escape(tb)}</pre>")
+            parts.append(
+                f"<pre style='color:red;'>{html_lib.escape(tb)}</pre>"
+            )
     return "\n".join(parts)
 
 
@@ -145,10 +158,12 @@ def execute_code_blocks(
             nb = nbformat.v4.new_notebook()
             nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
             ep = LoggingExecutePreprocessor(
-                    kernel_name="python3", timeout=300, allow_errors=True
-                    )
+                kernel_name="python3", timeout=300, allow_errors=True
+            )
             try:
-                ep.preprocess(nb, {"metadata": {"path": str(Path(src).parent)}})
+                ep.preprocess(
+                    nb, {"metadata": {"path": str(Path(src).parent)}}
+                )
             except Exception as e:
                 tb = traceback.format_exc()
                 if nb.cells:
@@ -198,7 +213,9 @@ def build_include_map(render_files):
                     target_rel = target
                     current_rel = current
                 target_path = target_rel.as_posix()
-                included_by.setdefault(target_path, []).append(current_rel.as_posix())
+                included_by.setdefault(target_path, []).append(
+                    current_rel.as_posix()
+                )
                 stack.append(target)
     return included_by
 
@@ -289,7 +306,9 @@ def build_include_tree(render_files):
     visited = set()
     stack = [Path(f).resolve() for f in render_files]
     root = Path(".").resolve()
-    root_dirs = {Path(f).resolve(): Path(f).parent.resolve() for f in render_files}
+    root_dirs = {
+        Path(f).resolve(): Path(f).parent.resolve() for f in render_files
+    }
     while stack:
         current = stack.pop()
         if current in visited or not current.exists():
@@ -323,7 +342,9 @@ def build_include_tree(render_files):
         tree[key] = includes
     # convert keys to posix strings
     root_dirs_str = {
-        p.relative_to(root).as_posix(): d for p, d in root_dirs.items() if p.exists()
+        p.relative_to(root).as_posix(): d
+        for p, d in root_dirs.items()
+        if p.exists()
     }
     return tree, root_dirs_str
 
@@ -393,7 +414,11 @@ def mirror_and_modify(files, anchors, roots):
             md5 = hashlib.md5(code.encode()).hexdigest()
             src_rel = str(src)
             code_blocks.setdefault(src_rel, []).append((code, md5))
-            return f"<div data-script=\"{src_rel}\" data-index=\"{idx}\" data-md5=\"{md5}\"></div>"
+            return (
+                f'<div data-script="{src_rel}" data-index="{idx}"'
+                f' data-md5="{md5}"></div>'
+            )
+
         text = code_pattern.sub(repl_code, text)
         dest.write_text(text)
     return code_blocks
@@ -402,7 +427,9 @@ def mirror_and_modify(files, anchors, roots):
 PROJECT_ROOT = Path(".").resolve()
 
 
-def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=None):
+def render_file(
+    src: Path, dest: Path, fragment: bool, bibliography=None, csl=None
+):
     """Render ``src`` to ``dest`` using Pandoc with embedded resources."""
 
     template = BODY_TEMPLATE if fragment else PANDOC_TEMPLATE
@@ -418,7 +445,9 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
         "--filter",
         "pandoc-crossref",
         "--citeproc",
-        f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML",
+        (
+            f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML"
+        ),
         "--template",
         os.path.relpath(template, dest.parent),
         "-o",
@@ -431,7 +460,7 @@ def render_file(src: Path, dest: Path, fragment: bool, bibliography=None, csl=No
     try:
         subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"{e.stderr}")
+        raise RuntimeError(f"{e.stderr}\nwhen trying to run:{' '.join(args)}")
 
 
 from lxml import html as lxml_html
@@ -443,12 +472,13 @@ def parse_headings(html_path: Path):
     tree = lxml_html.parse(str(html_path), parser)
     root = tree.getroot()
     headings = root.xpath("//h1|//h2|//h3|//h4|//h5|//h6")
+
     # Skip headings used for the page title which Quarto renders with the
     # ``title`` class. Including these in the navigation duplicates the page
     # title entry in the section list.
     def is_page_title(h):
-        cls = h.get('class') or ''
-        return 'title' in cls.split()
+        cls = h.get("class") or ""
+        return "title" in cls.split()
 
     headings = [h for h in headings if not is_page_title(h)]
     items: list[dict] = []
@@ -538,13 +568,16 @@ def postprocess_html(html_path: Path):
         else:
             node.getparent().remove(node)
     # add MathJax if math is present
-    has_math = bool(root.xpath('//*[@class="math inline" or @class="math display"]'))
+    has_math = bool(
+        root.xpath('//*[@class="math inline" or @class="math display"]')
+    )
     has_script = bool(root.xpath('//script[contains(@src, "MathJax")]'))
     if has_math and not has_script:
         head = root.xpath("//head")
         if head:
             path = os.path.relpath(
-                BUILD_DIR / "mathjax" / "es5" / "tex-mml-chtml.js", html_path.parent
+                BUILD_DIR / "mathjax" / "es5" / "tex-mml-chtml.js",
+                html_path.parent,
             )
             script = lxml_html.fragment_fromstring(
                 f'<script id="MathJax-script" async src="{path}"></script>',
@@ -568,7 +601,7 @@ def substitute_code_placeholders(
     formatter = HtmlFormatter()
     head = root.xpath("//head")
     if head and not root.xpath('//style[@id="pygments-style"]'):
-        style = formatter.get_style_defs('.highlight')
+        style = formatter.get_style_defs(".highlight")
         style_node = lxml_html.fragment_fromstring(
             f'<style id="pygments-style">{style}</style>', create_parent=False
         )
@@ -630,14 +663,12 @@ def build_all():
         html_file = (BUILD_DIR / qmd).with_suffix(".html")
         if html_file.exists():
             sections = parse_headings(html_file)
-            pages.append(
-                {
-                    "file": qmd,
-                    "href": html_file.name,
-                    "title": read_title(Path(qmd)),
-                    "sections": sections,
-                }
-            )
+            pages.append({
+                "file": qmd,
+                "href": html_file.name,
+                "title": read_title(Path(qmd)),
+                "sections": sections,
+            })
 
     for page in pages:
         html_file = (BUILD_DIR / page["file"]).with_suffix(".html")
@@ -676,7 +707,11 @@ class ChangeHandler(FileSystemEventHandler):
         self.refresher = refresher
 
     def handle(self, path, is_directory):
-        if not is_directory and path.endswith('.qmd') and '/_build/' not in path:
+        if (
+            not is_directory
+            and path.endswith(".qmd")
+            and "/_build/" not in path
+        ):
             print(f"Change detected: {path}")
             self.build()
             self.refresher.refresh()
@@ -720,8 +755,13 @@ def watch_and_serve(no_browser: bool = False):
     for f in abs_watch:
         print(" ", f)
 
-    threading.Thread(target=serve, kwargs={'thisdir': str(BUILD_DIR), 'port': port}, daemon=True).start()
+    threading.Thread(
+        target=serve,
+        kwargs={"thisdir": str(BUILD_DIR), "port": port},
+        daemon=True,
+    ).start()
     if no_browser:
+
         class Dummy:
             def refresh(self):
                 pass
@@ -732,7 +772,7 @@ def watch_and_serve(no_browser: bool = False):
     observer = Observer()
     handler = ChangeHandler(build_all, refresher)
     watched_dirs = {str(Path(f).parent) for f in abs_watch}
-    watched_dirs.add(str(Path('.').resolve()))
+    watched_dirs.add(str(Path(".").resolve()))
     for d in sorted(watched_dirs):
         observer.schedule(handler, d, recursive=False)
     observer.start()
