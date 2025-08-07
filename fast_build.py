@@ -569,7 +569,7 @@ def substitute_code_placeholders(
     head = root.xpath("//head")
     if head and not root.xpath('//style[@id="pygments-style"]'):
         style = formatter.get_style_defs('.highlight')
-        style += "\n.highlight { font-size: 0.5em; }"
+        style += "\n.highlight { font-size: 0.75em; }"
         style_node = lxml_html.fragment_fromstring(
             f'<style id="pygments-style">{style}</style>', create_parent=False
         )

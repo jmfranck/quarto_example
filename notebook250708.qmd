@@ -6,5 +6,5 @@ title: "Daily Log: 2025-07-08"
 
 This notebook links to specific tasks in subprojects:
 
-- Task 1: See Section [Task 1](project1/index.html#sec:task1)
-- Task 2: See Section [Task 2](project1/index.html#sec:task2)
+- Task 1: See Section @sec:task1
+- Task 2: See Section @sec:task2
