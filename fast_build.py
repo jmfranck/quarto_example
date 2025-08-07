@@ -459,14 +459,6 @@ def mirror_and_modify(files, anchors, roots):
 PROJECT_ROOT = Path(".").resolve()
 
 
-def resolve_project_path(p: str) -> Path:
-    """Return absolute path for ``p`` relative to project root."""
-    path = Path(os.path.expanduser(p))
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path
-
-
 def render_file(
     src: Path, dest: Path, fragment: bool, bibliography=None, csl=None
 ):
@@ -494,12 +486,18 @@ def render_file(
         dest.with_suffix(".html").name,
     ]
     if bibliography:
-        bib_path = resolve_project_path(bibliography)
+        bib_path = Path(os.path.expanduser(bibliography))
+        if not bib_path.is_absolute():
+            bib_path = PROJECT_ROOT / bib_path
         if not bib_path.exists():
-            raise FileNotFoundError(f"Bibliography file {bibliography} not found")
+            raise FileNotFoundError(
+                f"Bibliography file {bibliography} not found"
+            )
         args += ["--bibliography", os.path.relpath(bib_path, dest.parent)]
     if csl:
-        csl_path = resolve_project_path(csl)
+        csl_path = Path(os.path.expanduser(csl))
+        if not csl_path.is_absolute():
+            csl_path = PROJECT_ROOT / csl_path
         if not csl_path.exists():
             raise FileNotFoundError(f"CSL file {csl} not found")
         args += ["--csl", os.path.relpath(csl_path, dest.parent)]
