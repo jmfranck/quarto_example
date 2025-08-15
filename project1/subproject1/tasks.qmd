@@ -7,6 +7,8 @@ Implement data normalization for the dataset.
 Let's also make sure that this $x^2$ is rendered as math with mathjax!!
 Also make sure that we have *italics* and **bold**.
 
+![](end_vs_he_sketch.jpg)
+
 #### Task 2 {#sec:task2}
 
 Write visualization routines for exploratory analysis.
