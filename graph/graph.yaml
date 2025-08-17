@@ -1,0 +1,12 @@
+A:
+  text: "Start"
+  children: [B]
+  parents: []
+B:
+  text: "Middle"
+  parents: [A]
+  children: [C]
+C:
+  text: "End"
+  parents: [B]
+  children: []
