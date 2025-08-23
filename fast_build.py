@@ -29,6 +29,30 @@ from pygments import highlight
 from pygments.lexers import PythonLexer
 from pygments.formatters import HtmlFormatter
 
+# Convert ANSI escape codes in text to HTML. If the optional ansi2html
+# library is available, we use it to preserve colors. Otherwise, we fall
+# back to stripping the escape codes entirely and returning plain text.
+try:
+    from ansi2html import Ansi2HTMLConverter
+
+    _ansi_conv = Ansi2HTMLConverter(inline=True)
+
+    def _ansi_to_html(text: str, *, default_style: str | None = None) -> str:
+        """Return HTML for text that may contain ANSI escape codes."""
+        # ansi2html already escapes HTML characters as needed and inserts
+        # span tags for styling.
+        return f"<pre>{_ansi_conv.convert(text, full=False)}</pre>"
+
+except Exception:  # pragma: no cover - fallback when ansi2html is missing
+    import re
+
+    _ansi_escape = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+    def _ansi_to_html(text: str, *, default_style: str | None = None) -> str:
+        clean = _ansi_escape.sub("", text)
+        style = f" style='{default_style}'" if default_style else ""
+        return f"<pre{style}>{html_lib.escape(clean)}</pre>"
+
 
 class LoggingExecutePreprocessor(ExecutePreprocessor):
     """Execute notebook cells with progress printed to stdout."""
@@ -134,7 +158,7 @@ def outputs_to_html(outputs: list[dict]) -> str:
         typ = out.get("output_type")
         if typ == "stream":
             text = out.get("text", "")
-            parts.append(f"<pre>{html_lib.escape(text)}</pre>")
+            parts.append(_ansi_to_html(text))
         elif typ in {"display_data", "execute_result"}:
             data = out.get("data", {})
             if "text/html" in data:
@@ -146,16 +170,12 @@ def outputs_to_html(outputs: list[dict]) -> str:
                 src = f"data:image/jpeg;base64,{data['image/jpeg']}"
                 parts.append(f"<img src='{src}'/>")
             elif "text/plain" in data:
-                parts.append(
-                    f"<pre>{html_lib.escape(data['text/plain'])}</pre>"
-                )
+                parts.append(_ansi_to_html(data["text/plain"]))
         elif typ == "error":
             tb = "\n".join(out.get("traceback", []))
             if not tb:
                 tb = f"{out.get('ename', '')}: {out.get('evalue', '')}"
-            parts.append(
-                f"<pre style='color:red;'>{html_lib.escape(tb)}</pre>"
-            )
+            parts.append(_ansi_to_html(tb, default_style="color:red;"))
     return "\n".join(parts)
 
 
