@@ -97,6 +97,8 @@ include_pattern = re.compile(
 )
 # Python code block pattern
 code_pattern = re.compile(r"```\{python[^}]*\}\n(.*?)```", re.DOTALL)
+# Markdown image pattern
+image_pattern = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
 # Collect anchor definitions {#sec:id}, {#fig:id}, {#tab:id}
 anchor_pattern = re.compile(r"\{#(sec|fig|tab):([A-Za-z0-9_-]+)\}")
@@ -452,6 +454,24 @@ def mirror_and_modify(files, anchors, roots):
             )
 
         text = code_pattern.sub(repl_code, text)
+        # copy referenced images into the build directory
+        for img in image_pattern.findall(text):
+            img_path = img.split()[0]
+            if re.match(r"https?://", img_path) or img_path.startswith("data:"):
+                continue
+            target_src = (src.parent / img_path).resolve()
+            if not target_src.exists():
+                target_src = (root_dir / img_path).resolve()
+            if not target_src.exists():
+                target_src = (root_dir.parent / img_path).resolve()
+            if target_src.exists():
+                try:
+                    rel = target_src.relative_to(project_root)
+                except ValueError:
+                    continue
+                target_dest = BUILD_DIR / rel
+                target_dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(target_src, target_dest)
         dest.write_text(text)
     return code_blocks
 
