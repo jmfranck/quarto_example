@@ -245,32 +245,71 @@ def execute_code_blocks(
     return outputs, code_map
 
 
-def build_include_map(render_files):
-    """Map each included file to the files that include it."""
-    included_by = {}
-    for root_file in render_files:
-        root_dir = Path(root_file).parent
-        stack = [Path(root_file).resolve()]
-        visited = set()
-        while stack:
-            current = stack.pop()
-            if current in visited or not current.exists():
-                continue
-            visited.add(current)
-            content = current.read_text()
-            for _kind, inc in include_pattern.findall(content):
+def analyze_includes(render_files):
+    """Analyze include relationships for all render files.
+
+    Returns a tuple ``(tree, roots, included_by)`` where:
+
+    * ``tree`` maps each file to the files it directly includes.
+    * ``roots`` maps each file to the root directory of the main document
+      that ultimately includes it. This keeps include resolution consistent
+      with Quarto's behavior.
+    * ``included_by`` maps an included file to the files that include it.
+    """
+
+    tree: dict[str, list[str]] = {}
+    included_by: dict[str, list[str]] = {}
+    visited = set()
+
+    stack = [Path(f).resolve() for f in render_files]
+    root = Path(".").resolve()
+    root_dirs = {Path(f).resolve(): Path(f).parent.resolve() for f in render_files}
+
+    while stack:
+        current = stack.pop()
+        if current in visited or not current.exists():
+            continue
+        visited.add(current)
+        root_dir = root_dirs.get(current, current.parent)
+        includes: list[str] = []
+        text = current.read_text()
+        for _kind, inc in include_pattern.findall(text):
+            target = (current.parent / inc).resolve()
+            if not target.exists():
                 target = (root_dir / inc).resolve()
-                try:
-                    target_rel = target.relative_to(Path(".").resolve())
-                    current_rel = current.relative_to(Path(".").resolve())
-                except ValueError:
-                    target_rel = target
-                    current_rel = current
-                target_path = target_rel.as_posix()
-                included_by.setdefault(target_path, []).append(
-                    current_rel.as_posix()
-                )
-                stack.append(target)
+            if not target.exists():
+                target = (root_dir.parent / inc).resolve()
+            if not target.exists():
+                continue
+            try:
+                rel = target.relative_to(root).as_posix()
+            except ValueError:
+                rel = target.as_posix()
+            includes.append(rel)
+            stack.append(target)
+            root_dirs.setdefault(target, root_dir)
+            try:
+                cur_rel = current.relative_to(root).as_posix()
+            except ValueError:
+                cur_rel = current.as_posix()
+            included_by.setdefault(rel, []).append(cur_rel)
+        try:
+            key = current.relative_to(root).as_posix()
+        except ValueError:
+            key = current.as_posix()
+        tree[key] = includes
+
+    roots_str = {
+        p.relative_to(root).as_posix(): d
+        for p, d in root_dirs.items()
+        if p.exists()
+    }
+
+    return tree, roots_str, included_by
+
+
+def build_include_map(render_files):
+    _, _, included_by = analyze_includes(render_files)
     return included_by
 
 
@@ -355,52 +394,8 @@ def ensure_mathjax():
 
 
 def build_include_tree(render_files):
-    """Return mapping of each file to the files it includes and their root dirs."""
-    tree = {}
-    visited = set()
-    stack = [Path(f).resolve() for f in render_files]
-    root = Path(".").resolve()
-    root_dirs = {
-        Path(f).resolve(): Path(f).parent.resolve() for f in render_files
-    }
-    while stack:
-        current = stack.pop()
-        if current in visited or not current.exists():
-            continue
-        visited.add(current)
-        root_dir = root_dirs.get(current, current.parent)
-        includes = []
-        text = current.read_text()
-        for _kind, inc in include_pattern.findall(text):
-            target = (current.parent / inc).resolve()
-            if not target.exists():
-                target = (root_dir / inc).resolve()
-            if not target.exists():
-                target = (root_dir.parent / inc).resolve()
-            if not target.exists():
-                continue
-            try:
-                rel = target.relative_to(root).as_posix()
-            except ValueError:
-                rel = target.as_posix()
-            includes.append(rel)
-            stack.append(target)
-            # propagate the original root directory so includes are
-            # resolved relative to the main document rather than the
-            # including file
-            root_dirs.setdefault(target, root_dir)
-        try:
-            key = current.relative_to(root).as_posix()
-        except ValueError:
-            key = current.as_posix()
-        tree[key] = includes
-    # convert keys to posix strings
-    root_dirs_str = {
-        p.relative_to(root).as_posix(): d
-        for p, d in root_dirs.items()
-        if p.exists()
-    }
-    return tree, root_dirs_str
+    tree, roots, _ = analyze_includes(render_files)
+    return tree, roots
 
 
 def all_files(render_files, tree):
@@ -500,11 +495,21 @@ PROJECT_ROOT = Path(".").resolve()
 
 
 def render_file(
-    src: Path, dest: Path, fragment: bool, bibliography=None, csl=None
+    src: Path,
+    dest: Path,
+    fragment: bool,
+    bibliography=None,
+    csl=None,
+    webtex: bool = False,
 ):
     """Render ``src`` to ``dest`` using Pandoc with embedded resources."""
 
     template = BODY_TEMPLATE if fragment else PANDOC_TEMPLATE
+    math_arg = (
+        "--webtex"
+        if webtex
+        else f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML"
+    )
     args = [
         "pandoc",
         src.name,
@@ -517,9 +522,7 @@ def render_file(
         "--filter",
         "pandoc-crossref",
         "--citeproc",
-        (
-            f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML"
-        ),
+        math_arg,
         "--template",
         os.path.relpath(template, dest.parent),
         "-o",
@@ -715,10 +718,11 @@ def substitute_code_placeholders(
         tree.write(str(html_path), encoding="utf-8", method="html")
 
 
-def build_all():
+def build_all(webtex: bool = False):
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
-    ensure_mathjax()
-    shutil.copytree(MATHJAX_DIR, BUILD_DIR / "mathjax", dirs_exist_ok=True)
+    if not webtex:
+        ensure_mathjax()
+        shutil.copytree(MATHJAX_DIR, BUILD_DIR / "mathjax", dirs_exist_ok=True)
     # copy project configuration without the render list so individual renders
     # don't attempt to build the entire project
     cfg = yaml.safe_load(Path("_quarto.yml").read_text())
@@ -729,8 +733,7 @@ def build_all():
         shutil.copy2("_template/obs.lua", BUILD_DIR / "obs.lua")
     render_files = load_rendered_files()
     bibliography, csl = load_bibliography_csl()
-    include_map = build_include_map(render_files)
-    tree, roots = build_include_tree(render_files)
+    tree, roots, include_map = analyze_includes(render_files)
     anchors = collect_anchors(render_files, include_map)
 
     files = all_files(render_files, tree)
@@ -738,7 +741,7 @@ def build_all():
     order = build_order(render_files, tree)
     for f in order:
         fragment = f not in render_files
-        render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl)
+        render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl, webtex)
         html_file = (BUILD_DIR / f).with_suffix(".html")
         postprocess_html(html_file)
 
@@ -821,11 +824,11 @@ def serve(thisdir: str = "_build", port: int = 8000):
     httpd.serve_forever()
 
 
-def watch_and_serve(no_browser: bool = False):
-    build_all()
+def watch_and_serve(no_browser: bool = False, webtex: bool = False):
+    build_all(webtex=webtex)
     port = 8000
     render_files = load_rendered_files()
-    include_map = build_include_map(render_files)
+    _, _, include_map = analyze_includes(render_files)
     files_to_watch = sorted(set(render_files) | set(include_map.keys()))
     abs_watch = [str(Path(f).resolve()) for f in files_to_watch]
 
@@ -854,7 +857,7 @@ def watch_and_serve(no_browser: bool = False):
     else:
         refresher = BrowserReloader(url)
     observer = Observer()
-    handler = ChangeHandler(build_all, refresher)
+    handler = ChangeHandler(lambda: build_all(webtex=webtex), refresher)
     watched_dirs = {str(Path(f).parent) for f in abs_watch}
     watched_dirs.add(str(Path(".").resolve()))
     for d in sorted(watched_dirs):
@@ -880,8 +883,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Do not open a browser when using --watch",
     )
+    parser.add_argument(
+        "--webtex",
+        action="store_true",
+        help="Use Pandoc's --webtex option instead of MathJax",
+    )
     args = parser.parse_args()
     if args.watch:
-        watch_and_serve(no_browser=args.no_browser)
+        watch_and_serve(no_browser=args.no_browser, webtex=args.webtex)
     else:
-        build_all()
+        build_all(webtex=args.webtex)

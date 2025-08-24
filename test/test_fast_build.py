@@ -1,0 +1,82 @@
+import importlib
+import sys
+import types
+import shutil
+import os
+from pathlib import Path
+
+
+def import_fast_build():
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    mj = root / '_template' / 'mathjax' / 'es5'
+    (mj).mkdir(parents=True, exist_ok=True)
+    (mj / 'tex-mml-chtml.js').write_text('')
+    dummybin = root / 'dummybin'
+    dummybin.mkdir(exist_ok=True)
+    crossref = dummybin / 'pandoc-crossref'
+    crossref.write_text(
+        "#!/usr/bin/env python3\nimport sys, shutil; shutil.copyfileobj(sys.stdin.buffer, sys.stdout.buffer)"
+    )
+    crossref.chmod(0o755)
+    os.environ['PATH'] = f"{dummybin}:{os.environ['PATH']}"
+    import shutil as _shutil
+    real_which = _shutil.which
+    def fake_which(cmd):
+        if cmd == 'pandoc-crossref':
+            return str(crossref)
+        return real_which(cmd)
+    _shutil.which = fake_which
+    selenium_stub = types.ModuleType('selenium')
+    webdriver_stub = types.SimpleNamespace(
+        Chrome=lambda options=None: types.SimpleNamespace(quit=lambda: None),
+        ChromeOptions=lambda: types.SimpleNamespace(add_argument=lambda *a, **k: None),
+    )
+    selenium_stub.webdriver = webdriver_stub
+    selenium_stub.common = types.SimpleNamespace(
+        exceptions=types.SimpleNamespace(WebDriverException=Exception)
+    )
+    sys.modules['selenium'] = selenium_stub
+    sys.modules['selenium.webdriver'] = webdriver_stub
+    sys.modules['selenium.common'] = selenium_stub.common
+    sys.modules['selenium.common.exceptions'] = selenium_stub.common.exceptions
+    fast_build = importlib.import_module('fast_build')
+    fast_build.load_bibliography_csl = lambda: (None, None)
+    return fast_build
+
+
+def test_build_include_map():
+    fb = import_fast_build()
+    render_files = fb.load_rendered_files()
+    include_map = fb.build_include_map(render_files)
+    assert include_map['project1/index.qmd'] == ['projects.qmd']
+    assert include_map['project1/subproject1/index.qmd'] == ['project1/index.qmd']
+    assert include_map['project1/subproject1/tasks.qmd'] == ['project1/subproject1/index.qmd']
+    assert include_map['project1/subproject1/tryforerror.qmd'] == ['project1/subproject1/index.qmd']
+
+
+def test_build_all_includes(tmp_path):
+    fb = import_fast_build()
+    shutil.rmtree('_build', ignore_errors=True)
+    fb.build_all()
+    assert Path('_build/project1/subproject1/tasks.html').exists()
+    assert Path('_build/project1/subproject1/tryforerror.html').exists()
+
+
+def test_render_file_webtex(tmp_path, monkeypatch):
+    fb = import_fast_build()
+    fb.BUILD_DIR = tmp_path
+    (tmp_path / 'obs.lua').write_text('')
+    src = tmp_path / 'doc.qmd'
+    src.write_text('Math $x^2$')
+    dest = tmp_path / 'doc.qmd'
+    called = {}
+
+    def fake_run(cmd, check, cwd, capture_output):
+        called['args'] = cmd
+
+    monkeypatch.setattr(fb.subprocess, 'run', fake_run)
+    fb.render_file(src, dest, fragment=False, webtex=True)
+    assert '--webtex' in called['args']
+    assert not any(a.startswith('--mathjax') for a in called['args'])
