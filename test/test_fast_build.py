@@ -56,6 +56,26 @@ def test_build_include_map():
     assert include_map['project1/subproject1/tryforerror.qmd'] == ['project1/subproject1/index.qmd']
 
 
+def test_root_file_same_dir_include():
+    fb = import_fast_build()
+    nested = Path('project1/tmp_root')
+    nested.mkdir(parents=True, exist_ok=True)
+    root_file = nested / 'root.qmd'
+    inc_file = nested / 'inc.qmd'
+    root_file.write_text('{{< include inc.qmd >}}')
+    inc_file.write_text('content')
+    try:
+        tree, _, included_by = fb.analyze_includes([root_file.as_posix()])
+        rel_root = root_file.as_posix()
+        rel_inc = inc_file.as_posix()
+        assert tree[rel_root] == [rel_inc]
+        assert included_by[rel_inc] == [rel_root]
+    finally:
+        root_file.unlink()
+        inc_file.unlink()
+        nested.rmdir()
+
+
 def test_build_all_includes(tmp_path):
     fb = import_fast_build()
     shutil.rmtree('_build', ignore_errors=True)

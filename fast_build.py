@@ -262,7 +262,7 @@ def analyze_includes(render_files):
     visited = set()
 
     stack = [Path(f).resolve() for f in render_files]
-    root = Path(".").resolve()
+    root = PROJECT_ROOT
     root_dirs = {Path(f).resolve(): Path(f).parent.resolve() for f in render_files}
 
     while stack:
@@ -299,11 +299,15 @@ def analyze_includes(render_files):
             key = current.as_posix()
         tree[key] = includes
 
-    roots_str = {
-        p.relative_to(root).as_posix(): d
-        for p, d in root_dirs.items()
-        if p.exists()
-    }
+    roots_str: dict[str, Path] = {}
+    for p, d in root_dirs.items():
+        if not p.exists():
+            continue
+        try:
+            rel = p.relative_to(root).as_posix()
+        except ValueError:
+            rel = p.as_posix()
+        roots_str[rel] = d
 
     return tree, roots_str, included_by
 
