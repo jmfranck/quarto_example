@@ -4,6 +4,7 @@ import types
 import shutil
 import os
 from pathlib import Path
+import pytest
 
 
 def import_fast_build():
@@ -46,10 +47,10 @@ def import_fast_build():
     return fast_build
 
 
-def test_build_include_map():
+def test_analyze_includes_map():
     fb = import_fast_build()
     render_files = fb.load_rendered_files()
-    include_map = fb.build_include_map(render_files)
+    _, _, include_map = fb.analyze_includes(render_files)
     assert include_map['project1/index.qmd'] == ['projects.qmd']
     assert include_map['project1/subproject1/index.qmd'] == ['project1/index.qmd']
     assert include_map['project1/subproject1/tasks.qmd'] == ['project1/subproject1/index.qmd']
@@ -74,6 +75,14 @@ def test_root_file_same_dir_include():
         root_file.unlink()
         inc_file.unlink()
         nested.rmdir()
+
+
+def test_missing_include_error(tmp_path):
+    fb = import_fast_build()
+    src = tmp_path / 'root.qmd'
+    src.write_text('{{< include missing.qmd >}}')
+    with pytest.raises(FileNotFoundError):
+        fb.analyze_includes([src.as_posix()])
 
 
 def test_build_all_includes(tmp_path):

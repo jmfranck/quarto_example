@@ -280,7 +280,9 @@ def analyze_includes(render_files):
             if not target.exists():
                 target = (root_dir.parent / inc).resolve()
             if not target.exists():
-                continue
+                raise FileNotFoundError(
+                    f"Include file '{inc}' not found for '{current}'"
+                )
             try:
                 rel = target.relative_to(root).as_posix()
             except ValueError:
@@ -310,11 +312,6 @@ def analyze_includes(render_files):
         roots_str[rel] = d
 
     return tree, roots_str, included_by
-
-
-def build_include_map(render_files):
-    _, _, included_by = analyze_includes(render_files)
-    return included_by
 
 
 def resolve_render_file(file, included_by, render_files):
@@ -395,11 +392,6 @@ def ensure_mathjax():
     (MATHJAX_DIR / "es5").mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, MATHJAX_DIR / "es5", dirs_exist_ok=True)
     shutil.rmtree(tmp)
-
-
-def build_include_tree(render_files):
-    tree, roots, _ = analyze_includes(render_files)
-    return tree, roots
 
 
 def all_files(render_files, tree):
