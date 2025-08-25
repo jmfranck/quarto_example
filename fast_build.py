@@ -539,10 +539,17 @@ def render_file(
         if not csl_path.exists():
             raise FileNotFoundError(f"CSL file {csl} not found")
         args += ["--csl", os.path.relpath(csl_path, dest.parent)]
+    print(f"Running pandoc on {src}...", flush=True)
+    start = time.time()
     try:
         subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"{e.stderr}\nwhen trying to run:{' '.join(args)}")
+    duration = time.time() - start
+    print(
+        f"Finished pandoc on {src} in {duration:.1f}s",
+        flush=True,
+    )
 
 
 from lxml import html as lxml_html
