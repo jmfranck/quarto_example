@@ -36,7 +36,9 @@ def import_fast_build():
     )
     selenium_stub.webdriver = webdriver_stub
     selenium_stub.common = types.SimpleNamespace(
-        exceptions=types.SimpleNamespace(WebDriverException=Exception)
+        exceptions=types.SimpleNamespace(
+            WebDriverException=Exception, NoSuchWindowException=Exception
+        )
     )
     sys.modules['selenium'] = selenium_stub
     sys.modules['selenium.webdriver'] = webdriver_stub

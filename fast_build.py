@@ -18,8 +18,7 @@ import yaml
 from watchdog.observers.polling import PollingObserver as Observer
 from watchdog.events import FileSystemEventHandler
 from selenium import webdriver
-from selenium.common.exceptions import WebDriverException
-import selenium
+from selenium.common.exceptions import WebDriverException, NoSuchWindowException
 from jinja2 import Environment, FileSystemLoader
 import nbformat
 from nbconvert.preprocessors import ExecutePreprocessor
@@ -540,10 +539,17 @@ def render_file(
         if not csl_path.exists():
             raise FileNotFoundError(f"CSL file {csl} not found")
         args += ["--csl", os.path.relpath(csl_path, dest.parent)]
+    print(f"Running pandoc on {src}...", flush=True)
+    start = time.time()
     try:
         subprocess.run(args, check=True, cwd=dest.parent, capture_output=True)
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"{e.stderr}\nwhen trying to run:{' '.join(args)}")
+    duration = time.time() - start
+    print(
+        f"Finished pandoc on {src} in {duration:.1f}s",
+        flush=True,
+    )
 
 
 from lxml import html as lxml_html
@@ -777,11 +783,30 @@ class BrowserReloader:
         self.browser.get(self.url)
 
     def refresh(self):
+        """Refresh the page if the browser is still open."""
+        if not self.browser:
+            return
         try:
             self.browser.refresh()
-        except selenium.common.exceptions.WebDriverException:
-            self.browser.quit()
-            self.init_browser()
+        except WebDriverException:
+            try:
+                self.browser.quit()
+            except Exception:
+                pass
+            self.browser = None
+
+    def is_alive(self) -> bool:
+        """Return True if the browser window is still open."""
+        if not self.browser:
+            return False
+        try:
+            handles = self.browser.window_handles
+            if not handles:
+                return False
+            self.browser.execute_script("return 1")
+            return True
+        except (NoSuchWindowException, WebDriverException):
+            return False
 
 
 class ChangeHandler(FileSystemEventHandler):
@@ -809,14 +834,8 @@ class ChangeHandler(FileSystemEventHandler):
         self.handle(event.dest_path, event.is_directory)
 
 
-def serve(thisdir: str = "_build", port: int = 8000):
-    class Handler(SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=thisdir, **kwargs)
-
-    httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"Serving {thisdir} at http://localhost:{port}")
-    Path(thisdir).mkdir(parents=True, exist_ok=True)
+def _serve_forever(httpd: ThreadingHTTPServer):
+    """Run the HTTP server until shutdown is called."""
     httpd.serve_forever()
 
 
@@ -838,11 +857,18 @@ def watch_and_serve(no_browser: bool = False, webtex: bool = False):
     for f in abs_watch:
         print(" ", f)
 
-    threading.Thread(
-        target=serve,
-        kwargs={"thisdir": str(BUILD_DIR), "port": port},
-        daemon=True,
-    ).start()
+    class Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(BUILD_DIR), **kwargs)
+
+    try:
+        httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    except OSError as exc:  # pragma: no cover - depends on local environment
+        print(f"Could not start server on port {port}: {exc}")
+        return
+    print(f"Serving {BUILD_DIR} at http://localhost:{port}")
+    Path(BUILD_DIR).mkdir(parents=True, exist_ok=True)
+    threading.Thread(target=_serve_forever, args=(httpd,), daemon=True).start()
     if no_browser:
 
         class Dummy:
@@ -861,10 +887,21 @@ def watch_and_serve(no_browser: bool = False, webtex: bool = False):
     observer.start()
     try:
         while True:
+            if not no_browser and not refresher.is_alive():
+                break
             time.sleep(1)
     except KeyboardInterrupt:
+        pass
+    finally:
         observer.stop()
-    observer.join()
+        observer.join()
+        httpd.shutdown()
+        httpd.server_close()
+        if not no_browser and getattr(refresher, "browser", None):
+            try:
+                refresher.browser.quit()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":
