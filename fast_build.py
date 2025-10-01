@@ -185,6 +185,15 @@ def outputs_to_html(outputs: list[dict]) -> str:
 NOTEBOOK_CACHE_DIR = Path("_nbcache")
 
 
+def _has_reset_command(code: str) -> bool:
+    """Return ``True`` if ``code`` contains an IPython ``%reset`` directive."""
+
+    for line in code.splitlines():
+        if line.lstrip().startswith("%reset"):
+            return True
+    return False
+
+
 def execute_code_blocks(
     blocks: dict[str, list[tuple[str, str]]]
 ) -> tuple[dict[tuple[str, int], str], dict[tuple[str, int], str]]:
@@ -200,49 +209,66 @@ def execute_code_blocks(
     for src, cells in blocks.items():
         if not cells:
             continue
-        codes = [c for c, _ in cells]
-        md5s = [m for _, m in cells]
-        combined = "".join(md5s).encode()
-        nb_hash = hashlib.md5(combined).hexdigest()
-        nb_path = NOTEBOOK_CACHE_DIR / f"{nb_hash}.ipynb"
-        if nb_path.exists():
-            print(f"Reading cached output for {src} from {nb_path}!")
-            nb = nbformat.read(nb_path, as_version=4)
-        else:
-            print(f"Generating notebook for {src} at {nb_path}:")
-            nb = nbformat.v4.new_notebook()
-            nb.cells = [nbformat.v4.new_code_cell(c) for c in codes]
-            ep = LoggingExecutePreprocessor(
-                kernel_name="python3", timeout=10800, allow_errors=True
-            )
-            try:
-                ep.preprocess(
-                    nb, {"metadata": {"path": str(Path(src).parent)}}
+        segments: list[list[tuple[int, str, str]]] = []
+        current: list[tuple[int, str, str]] = []
+        for idx, (code, md5) in enumerate(cells, start=1):
+            current.append((idx, code, md5))
+            if _has_reset_command(code):
+                segments.append(current)
+                current = []
+        if current:
+            segments.append(current)
+
+        for segment in segments:
+            seg_codes = [code for _, code, _ in segment]
+            seg_md5s = [md5 for _, _, md5 in segment]
+            combined = "".join(seg_md5s).encode()
+            nb_hash = hashlib.md5(combined).hexdigest()
+            nb_path = NOTEBOOK_CACHE_DIR / f"{nb_hash}.ipynb"
+            if nb_path.exists():
+                print(f"Reading cached output for {src} from {nb_path}!")
+                nb = nbformat.read(nb_path, as_version=4)
+            else:
+                print(f"Generating notebook for {src} at {nb_path}:")
+                nb = nbformat.v4.new_notebook()
+                nb.cells = [nbformat.v4.new_code_cell(c) for c in seg_codes]
+                ep = LoggingExecutePreprocessor(
+                    kernel_name="python3", timeout=10800, allow_errors=True
                 )
-            except Exception as e:
-                tb = traceback.format_exc()
-                if nb.cells:
-                    nb.cells[0].outputs = [
-                        nbformat.v4.new_output(
-                            output_type="error",
-                            ename=type(e).__name__,
-                            evalue=str(e),
-                            traceback=tb.splitlines(),
-                        )
-                    ]
-                    for cell in nb.cells[1:]:
-                        cell.outputs = [
+                try:
+                    ep.preprocess(
+                        nb, {"metadata": {"path": str(Path(src).parent)}}
+                    )
+                except Exception as e:
+                    tb = traceback.format_exc()
+                    if nb.cells:
+                        nb.cells[0].outputs = [
                             nbformat.v4.new_output(
-                                output_type="stream",
-                                name="stderr",
-                                text="previous cell failed to execute\n",
+                                output_type="error",
+                                ename=type(e).__name__,
+                                evalue=str(e),
+                                traceback=tb.splitlines(),
                             )
                         ]
-            nbformat.write(nb, nb_path)
-        for idx, cell in enumerate(nb.cells, start=1):
-            html = outputs_to_html(cell.get("outputs", []))
-            outputs[(src, idx)] = html
-            code_map[(src, idx)] = codes[idx - 1]
+                        for cell in nb.cells[1:]:
+                            cell.outputs = [
+                                nbformat.v4.new_output(
+                                    output_type="stream",
+                                    name="stderr",
+                                    text="previous cell failed to execute\n",
+                                )
+                            ]
+                nbformat.write(nb, nb_path)
+
+            if len(nb.cells) != len(segment):
+                raise RuntimeError(
+                    "Cached notebook cell count mismatch for segment in " f"{src}"
+                )
+
+            for (idx, code, _), cell in zip(segment, nb.cells):
+                html = outputs_to_html(cell.get("outputs", []))
+                outputs[(src, idx)] = html
+                code_map[(src, idx)] = code
     return outputs, code_map
 
 
