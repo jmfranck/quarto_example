@@ -11,6 +11,8 @@ import traceback
 from pathlib import Path
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 import shutil
 import yaml
 
@@ -460,7 +462,7 @@ def mirror_and_modify(files, anchors, roots):
             code_blocks.setdefault(src_rel, []).append((code, md5))
             return (
                 f'<div data-script="{src_rel}" data-index="{idx}"'
-                f' data-md5="{md5}"></div>'
+                f' data-md5="{md5}"><em>Running notebook...</em></div>'
             )
 
         text = code_pattern.sub(repl_code, text)
@@ -720,7 +722,7 @@ def substitute_code_placeholders(
         tree.write(str(html_path), encoding="utf-8", method="html")
 
 
-def build_all(webtex: bool = False):
+def build_all(webtex: bool = False, refresher: Optional[object] = None):
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     if not webtex:
         ensure_mathjax()
@@ -741,11 +743,17 @@ def build_all(webtex: bool = False):
     files = all_files(render_files, tree)
     code_blocks = mirror_and_modify(files, anchors, roots)
     order = build_order(render_files, tree)
-    for f in order:
+
+    def render_task(f: str) -> None:
         fragment = f not in render_files
         render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl, webtex)
         html_file = (BUILD_DIR / f).with_suffix(".html")
         postprocess_html(html_file)
+
+    with ThreadPoolExecutor() as pool:
+        futures = [pool.submit(render_task, f) for f in order]
+        for fut in futures:
+            fut.result()
 
     pages = []
     for qmd in render_files:
@@ -763,11 +771,19 @@ def build_all(webtex: bool = False):
         html_file = (BUILD_DIR / page["file"]).with_suffix(".html")
         add_navigation(html_file, pages, page["file"])
 
-    outputs, code_map = execute_code_blocks(code_blocks)
-    for f in files:
-        html_file = (BUILD_DIR / f).with_suffix(".html")
-        if html_file.exists():
-            substitute_code_placeholders(html_file, outputs, code_map)
+    if refresher:
+        refresher.refresh()
+
+    def run_notebooks() -> None:
+        outputs, code_map = execute_code_blocks(code_blocks)
+        for f in files:
+            html_file = (BUILD_DIR / f).with_suffix(".html")
+            if html_file.exists():
+                substitute_code_placeholders(html_file, outputs, code_map)
+        if refresher:
+            refresher.refresh()
+
+    threading.Thread(target=run_notebooks, daemon=True).start()
 
 
 class BrowserReloader:
@@ -810,9 +826,8 @@ class BrowserReloader:
 
 
 class ChangeHandler(FileSystemEventHandler):
-    def __init__(self, build_func, refresher):
+    def __init__(self, build_func):
         self.build = build_func
-        self.refresher = refresher
 
     def handle(self, path, is_directory):
         if (
@@ -822,7 +837,6 @@ class ChangeHandler(FileSystemEventHandler):
         ):
             print(f"Change detected: {path}")
             self.build()
-            self.refresher.refresh()
 
     def on_modified(self, event):
         self.handle(event.src_path, event.is_directory)
@@ -840,7 +854,6 @@ def _serve_forever(httpd: ThreadingHTTPServer):
 
 
 def watch_and_serve(no_browser: bool = False, webtex: bool = False):
-    build_all(webtex=webtex)
     port = 8000
     render_files = load_rendered_files()
     _, _, include_map = analyze_includes(render_files)
@@ -878,8 +891,11 @@ def watch_and_serve(no_browser: bool = False, webtex: bool = False):
         refresher = Dummy()
     else:
         refresher = BrowserReloader(url)
+
+    build_all(webtex=webtex, refresher=refresher)
+
     observer = Observer()
-    handler = ChangeHandler(lambda: build_all(webtex=webtex), refresher)
+    handler = ChangeHandler(lambda: build_all(webtex=webtex, refresher=refresher))
     watched_dirs = {str(Path(f).parent) for f in abs_watch}
     watched_dirs.add(str(Path(".").resolve()))
     for d in sorted(watched_dirs):
