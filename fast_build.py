@@ -372,6 +372,7 @@ def replace_refs(path, anchors):
 
 
 BUILD_DIR = Path("_build")
+DISPLAY_DIR = Path("_display")
 BODY_TEMPLATE = Path("_template/body-only.html").resolve()
 PANDOC_TEMPLATE = Path("_template/pandoc_template.html").resolve()
 NAV_TEMPLATE = Path("_template/nav_template.html").resolve()
@@ -421,6 +422,25 @@ def build_order(render_files, tree):
     return order
 
 
+def collect_render_targets(targets, included_by, render_files):
+    """Find render files impacted by ``targets``."""
+    result = set()
+    stack = list(targets)
+    seen = set()
+    render_set = set(render_files)
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        if current in render_set:
+            result.add(current)
+        if current in included_by:
+            for parent in included_by[current]:
+                stack.append(parent)
+    return result
+
+
 def mirror_and_modify(files, anchors, roots):
     project_root = PROJECT_ROOT
     code_blocks: dict[str, list[tuple[str, str]]] = {}
@@ -445,7 +465,12 @@ def mirror_and_modify(files, anchors, roots):
             html_path = (BUILD_DIR / target_rel).with_suffix(".html")
             inc_path = os.path.relpath(html_path, dest.parent)
             # use an element marker preserved by Pandoc
-            return f'<div data-{kind.lower()}="{inc_path}"></div>'
+            source_attr = target_rel.with_suffix(".html").as_posix()
+            # keep track of the staged include so the display pass can load it
+            return (
+                f'<div data-{kind.lower()}="{inc_path}" '
+                f'data-source="{source_attr}"></div>'
+            )
 
         text = include_pattern.sub(repl, text)
 
@@ -612,11 +637,25 @@ def add_navigation(html_path: Path, pages: list[dict], current: str):
     body = root.xpath("//body")
     if not body:
         return
+    # remove any existing navigation to keep incremental updates clean
+    for old in root.xpath('//*[@id="on-this-page"]'):
+        parent = old.getparent()
+        if parent is not None:
+            parent.remove(old)
+    for old in root.xpath("//style[contains(., '#on-this-page')]"):
+        parent = old.getparent()
+        if parent is not None:
+            parent.remove(old)
+    for old in root.xpath("//script[contains(., 'on-this-page')]"):
+        parent = old.getparent()
+        if parent is not None:
+            parent.remove(old)
+
     env = Environment(loader=FileSystemLoader(str(NAV_TEMPLATE.parent)))
     tmpl = env.get_template(NAV_TEMPLATE.name)
     local_pages = []
     for page in pages:
-        href_path = (BUILD_DIR / page["file"]).with_suffix(".html")
+        href_path = (DISPLAY_DIR / page["file"]).with_suffix(".html")
         href = os.path.relpath(href_path, html_path.parent)
         local_pages.append({**page, "href": href})
     rendered = tmpl.render(pages=local_pages, current=current)
@@ -631,12 +670,14 @@ def add_navigation(html_path: Path, pages: list[dict], current: str):
     tree.write(str(html_path), encoding="utf-8", method="html")
 
 
-def postprocess_html(html_path: Path):
+def postprocess_html(html_path: Path, include_root: Path, resource_root: Path):
     """Replace placeholder nodes with referenced HTML bodies."""
     root = lxml_html.fromstring(html_path.read_text())
     for node in list(root.xpath("//*[@data-include] | //*[@data-embed]")):
-        target_rel = node.get("data-include") or node.get("data-embed")
-        target = (html_path.parent / target_rel).resolve()
+        target_rel = node.get("data-source")
+        if not target_rel:
+            target_rel = node.get("data-include") or node.get("data-embed")
+        target = (include_root / target_rel).resolve()
         if target.exists():
             frag_text = target.read_text()
             frag = lxml_html.fromstring(frag_text)
@@ -655,7 +696,9 @@ def postprocess_html(html_path: Path):
                 parent.insert(idx, elem)
             parent.insert(idx, start_c)
         else:
-            node.getparent().remove(node)
+            parent = node.getparent()
+            if parent is not None:
+                parent.remove(node)
     # add MathJax if math is present
     has_math = bool(
         root.xpath('//*[@class="math inline" or @class="math display"]')
@@ -665,7 +708,7 @@ def postprocess_html(html_path: Path):
         head = root.xpath("//head")
         if head:
             path = os.path.relpath(
-                BUILD_DIR / "mathjax" / "es5" / "tex-mml-chtml.js",
+                resource_root / "mathjax" / "es5" / "tex-mml-chtml.js",
                 html_path.parent,
             )
             script = lxml_html.fragment_fromstring(
@@ -720,8 +763,9 @@ def substitute_code_placeholders(
         tree.write(str(html_path), encoding="utf-8", method="html")
 
 
-def build_all(webtex: bool = False):
+def build_all(webtex: bool = False, changed_paths=None):
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    DISPLAY_DIR.mkdir(parents=True, exist_ok=True)
     if not webtex:
         ensure_mathjax()
         shutil.copytree(MATHJAX_DIR, BUILD_DIR / "mathjax", dirs_exist_ok=True)
@@ -733,23 +777,80 @@ def build_all(webtex: bool = False):
     (BUILD_DIR / "_quarto.yml").write_text(yaml.safe_dump(cfg))
     if Path("_template/obs.lua").exists():
         shutil.copy2("_template/obs.lua", BUILD_DIR / "obs.lua")
+
     render_files = load_rendered_files()
     bibliography, csl = load_bibliography_csl()
     tree, roots, include_map = analyze_includes(render_files)
     anchors = collect_anchors(render_files, include_map)
 
     files = all_files(render_files, tree)
-    code_blocks = mirror_and_modify(files, anchors, roots)
+    if changed_paths:
+        normalized = set()
+        for path in changed_paths:
+            candidate = Path(path)
+            if not candidate.exists():
+                continue
+            try:
+                rel = candidate.resolve().relative_to(PROJECT_ROOT)
+            except ValueError:
+                continue
+            if rel.suffix != ".qmd":
+                continue
+            normalized.add(rel.as_posix())
+        stage_set = {f for f in normalized if f in files}
+        # make sure direct changes to a render file are captured even if the
+        # include map has not seen it yet
+        for rel in normalized:
+            if rel not in stage_set and (PROJECT_ROOT / rel).exists():
+                stage_set.add(rel)
+        display_targets = collect_render_targets(stage_set, include_map, render_files)
+        for rel in stage_set:
+            if rel in render_files:
+                display_targets.add(rel)
+        if not stage_set and not display_targets:
+            return {
+                "render_files": render_files,
+                "tree": tree,
+                "include_map": include_map,
+            }
+    else:
+        stage_set = set(files)
+        display_targets = set(render_files)
+
+    stage_files = sorted(stage_set)
+    # phase 1: rebuild the modified sources into the staging tree
+    code_blocks = mirror_and_modify(stage_files, anchors, roots)
     order = build_order(render_files, tree)
     for f in order:
+        if f not in stage_set:
+            continue
         fragment = f not in render_files
         render_file(Path(f), BUILD_DIR / f, fragment, bibliography, csl, webtex)
+
+    outputs = {}
+    code_map = {}
+    # phase 2: execute notebooks and insert code output for the staged pages
+    if code_blocks:
+        outputs, code_map = execute_code_blocks(code_blocks)
+    for f in stage_files:
         html_file = (BUILD_DIR / f).with_suffix(".html")
-        postprocess_html(html_file)
+        if html_file.exists():
+            substitute_code_placeholders(html_file, outputs, code_map)
+
+    # phase 3: assemble the served pages from staged fragments
+    for target in sorted(display_targets):
+        src_html = (BUILD_DIR / target).with_suffix(".html")
+        if not src_html.exists():
+            continue
+        dest_html = (DISPLAY_DIR / target).with_suffix(".html")
+        dest_html.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src_html, dest_html)
+        # build includes and math for the served page using staged fragments
+        postprocess_html(dest_html, BUILD_DIR, BUILD_DIR)
 
     pages = []
     for qmd in render_files:
-        html_file = (BUILD_DIR / qmd).with_suffix(".html")
+        html_file = (DISPLAY_DIR / qmd).with_suffix(".html")
         if html_file.exists():
             sections = parse_headings(html_file)
             pages.append({
@@ -760,14 +861,11 @@ def build_all(webtex: bool = False):
             })
 
     for page in pages:
-        html_file = (BUILD_DIR / page["file"]).with_suffix(".html")
-        add_navigation(html_file, pages, page["file"])
-
-    outputs, code_map = execute_code_blocks(code_blocks)
-    for f in files:
-        html_file = (BUILD_DIR / f).with_suffix(".html")
+        html_file = (DISPLAY_DIR / page["file"]).with_suffix(".html")
         if html_file.exists():
-            substitute_code_placeholders(html_file, outputs, code_map)
+            add_navigation(html_file, pages, page["file"])
+
+    return {"render_files": render_files, "tree": tree, "include_map": include_map}
 
 
 class BrowserReloader:
@@ -819,9 +917,10 @@ class ChangeHandler(FileSystemEventHandler):
             not is_directory
             and path.endswith(".qmd")
             and "/_build/" not in path
+            and "/_display/" not in path
         ):
             print(f"Change detected: {path}")
-            self.build()
+            self.build(path)
             self.refresher.refresh()
 
     def on_modified(self, event):
@@ -840,12 +939,9 @@ def _serve_forever(httpd: ThreadingHTTPServer):
 
 
 def watch_and_serve(no_browser: bool = False, webtex: bool = False):
-    build_all(webtex=webtex)
+    state = build_all(webtex=webtex)
     port = 8000
-    render_files = load_rendered_files()
-    _, _, include_map = analyze_includes(render_files)
-    files_to_watch = sorted(set(render_files) | set(include_map.keys()))
-    abs_watch = [str(Path(f).resolve()) for f in files_to_watch]
+    render_files = state["render_files"]
 
     if render_files:
         start_page = Path(render_files[0]).with_suffix(".html").as_posix()
@@ -853,21 +949,39 @@ def watch_and_serve(no_browser: bool = False, webtex: bool = False):
         start_page = ""
     url = f"http://localhost:{port}/{start_page}"
 
-    print("Watching files:")
-    for f in abs_watch:
-        print(" ", f)
+    print("Watching project root:")
+    print(" ", PROJECT_ROOT)
 
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(BUILD_DIR), **kwargs)
+            super().__init__(*args, directory=str(DISPLAY_DIR), **kwargs)
+
+        def translate_path(self, path):
+            rel = path.lstrip("/")
+            if not rel:
+                rel = ""
+            display_root = DISPLAY_DIR.resolve()
+            build_root = BUILD_DIR.resolve()
+            display_candidate = (DISPLAY_DIR / rel).resolve()
+            if (
+                display_candidate.exists()
+                and str(display_candidate).startswith(str(display_root))
+            ):
+                return str(display_candidate)
+            build_candidate = (BUILD_DIR / rel).resolve()
+            if build_candidate.exists() and str(build_candidate).startswith(str(build_root)):
+                return str(build_candidate)
+            return super().translate_path(path)
 
     try:
         httpd = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     except OSError as exc:  # pragma: no cover - depends on local environment
         print(f"Could not start server on port {port}: {exc}")
         return
-    print(f"Serving {BUILD_DIR} at http://localhost:{port}")
-    Path(BUILD_DIR).mkdir(parents=True, exist_ok=True)
+    print(
+        f"Serving {DISPLAY_DIR} with fallback to {BUILD_DIR} at http://localhost:{port}"
+    )
+    Path(DISPLAY_DIR).mkdir(parents=True, exist_ok=True)
     threading.Thread(target=_serve_forever, args=(httpd,), daemon=True).start()
     if no_browser:
 
@@ -879,11 +993,11 @@ def watch_and_serve(no_browser: bool = False, webtex: bool = False):
     else:
         refresher = BrowserReloader(url)
     observer = Observer()
-    handler = ChangeHandler(lambda: build_all(webtex=webtex), refresher)
-    watched_dirs = {str(Path(f).parent) for f in abs_watch}
-    watched_dirs.add(str(Path(".").resolve()))
-    for d in sorted(watched_dirs):
-        observer.schedule(handler, d, recursive=False)
+    def rebuild(path):
+        build_all(webtex=webtex, changed_paths=[path])
+
+    handler = ChangeHandler(rebuild, refresher)
+    observer.schedule(handler, str(PROJECT_ROOT), recursive=True)
     observer.start()
     try:
         while True:
