@@ -528,7 +528,7 @@ def render_file(
     math_arg = (
         "--webtex"
         if webtex
-        else f"--mathjax={os.path.relpath(BUILD_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML"
+        else f"--mathjax={os.path.relpath(DISPLAY_DIR / 'mathjax' / 'es5' / 'tex-mml-chtml.js', dest.parent)}?config=TeX-AMS_CHTML"
     )
     args = [
         "pandoc",
@@ -776,10 +776,8 @@ def build_all(webtex: bool = False, changed_paths=None):
     DISPLAY_DIR.mkdir(parents=True, exist_ok=True)
     if not webtex:
         ensure_mathjax()
-        # keep MathJax in the staging area for Pandoc while also mirroring it
-        # into the display tree so browsers load assets directly from the
-        # served directory instead of falling back to _build.
-        shutil.copytree(MATHJAX_DIR, BUILD_DIR / "mathjax", dirs_exist_ok=True)
+        # copy MathJax into the display tree so browsers load assets from the
+        # served directory while the staging area remains limited to fragments.
         shutil.copytree(MATHJAX_DIR, DISPLAY_DIR / "mathjax", dirs_exist_ok=True)
     # copy project configuration without the render list so individual renders
     # don't attempt to build the entire project
