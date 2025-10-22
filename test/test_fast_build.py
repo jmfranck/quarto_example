@@ -95,6 +95,25 @@ def test_build_all_includes(tmp_path):
     assert Path('_build/project1/subproject1/tryforerror.html').exists()
 
 
+def test_build_all_propagates_to_roots():
+    fb = import_fast_build()
+    shutil.rmtree('_build', ignore_errors=True)
+    shutil.rmtree('_display', ignore_errors=True)
+    fb.build_all()
+    leaf = Path('project1/subproject1/tasks.qmd')
+    original = leaf.read_text()
+    marker = 'updated-from-test'
+    try:
+        leaf.write_text(original + f"\n{marker}\n")
+        fb.build_all(changed_paths=[leaf.as_posix()])
+        html_path = Path('_display/projects.html')
+        # the rendered root listed in _quarto.yml should pick up the leaf change
+        assert marker in html_path.read_text()
+    finally:
+        leaf.write_text(original)
+        fb.build_all(changed_paths=[leaf.as_posix()])
+
+
 def test_render_file_webtex(tmp_path, monkeypatch):
     fb = import_fast_build()
     fb.BUILD_DIR = tmp_path

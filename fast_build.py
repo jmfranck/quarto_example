@@ -827,12 +827,26 @@ def build_all(webtex: bool = False, changed_paths=None):
             if rel.suffix != ".qmd":
                 continue
             normalized.add(rel.as_posix())
-        stage_set = {f for f in normalized if f in files}
-        # make sure direct changes to a render file are captured even if the
-        # include map has not seen it yet
+        stage_set = set()
         for rel in normalized:
-            if rel not in stage_set and (PROJECT_ROOT / rel).exists():
-                stage_set.add(rel)
+            if rel not in files and not (PROJECT_ROOT / rel).exists():
+                continue
+            stage_set.add(rel)
+            stack = [rel]
+            # walk up the include tree so every ancestor fragment is rebuilt
+            # alongside the modified leaf. This ensures staged HTML mirrors the
+            # include chain that Quarto would regenerate.
+            while stack:
+                current = stack.pop()
+                if current not in include_map:
+                    continue
+                for parent in include_map[current]:
+                    if parent in stage_set:
+                        continue
+                    parent_path = PROJECT_ROOT / parent
+                    if parent in files or parent_path.exists():
+                        stage_set.add(parent)
+                        stack.append(parent)
         display_targets = collect_render_targets(stage_set, include_map, render_files)
         for rel in stage_set:
             if rel in render_files:
