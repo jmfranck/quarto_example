@@ -699,23 +699,31 @@ def postprocess_html(html_path: Path, include_root: Path, resource_root: Path):
             parent = node.getparent()
             if parent is not None:
                 parent.remove(node)
-    # add MathJax if math is present
-    has_math = bool(
-        root.xpath('//*[@class="math inline" or @class="math display"]')
+    # ensure MathJax references point at the provided resource root so the
+    # served HTML loads scripts from the display tree instead of the staging
+    # area.
+    math_nodes = root.xpath(
+        '//*[@class="math inline" or @class="math display"]'
     )
-    has_script = bool(root.xpath('//script[contains(@src, "MathJax")]'))
-    if has_math and not has_script:
+    if math_nodes:
         head = root.xpath("//head")
         if head:
-            path = os.path.relpath(
+            math_path = os.path.relpath(
                 resource_root / "mathjax" / "es5" / "tex-mml-chtml.js",
                 html_path.parent,
             )
-            script = lxml_html.fragment_fromstring(
-                f'<script id="MathJax-script" async src="{path}"></script>',
-                create_parent=False,
-            )
-            head[0].append(script)
+            existing = root.xpath('//script[contains(@src, "MathJax")]')
+            if existing:
+                for node in existing:
+                    node.set("src", math_path)
+                    node.set("id", node.get("id") or "MathJax-script")
+                    node.set("async", "")
+            else:
+                script = lxml_html.fragment_fromstring(
+                    f'<script id="MathJax-script" async src="{math_path}"></script>',
+                    create_parent=False,
+                )
+                head[0].append(script)
     html_path.write_text(lxml_html.tostring(root, encoding="unicode"))
 
 
@@ -768,7 +776,11 @@ def build_all(webtex: bool = False, changed_paths=None):
     DISPLAY_DIR.mkdir(parents=True, exist_ok=True)
     if not webtex:
         ensure_mathjax()
+        # keep MathJax in the staging area for Pandoc while also mirroring it
+        # into the display tree so browsers load assets directly from the
+        # served directory instead of falling back to _build.
         shutil.copytree(MATHJAX_DIR, BUILD_DIR / "mathjax", dirs_exist_ok=True)
+        shutil.copytree(MATHJAX_DIR, DISPLAY_DIR / "mathjax", dirs_exist_ok=True)
     # copy project configuration without the render list so individual renders
     # don't attempt to build the entire project
     cfg = yaml.safe_load(Path("_quarto.yml").read_text())
@@ -845,8 +857,9 @@ def build_all(webtex: bool = False, changed_paths=None):
         dest_html = (DISPLAY_DIR / target).with_suffix(".html")
         dest_html.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src_html, dest_html)
-        # build includes and math for the served page using staged fragments
-        postprocess_html(dest_html, BUILD_DIR, BUILD_DIR)
+        # build includes using staged fragments and rewrite math assets to the
+        # display tree that the web server presents.
+        postprocess_html(dest_html, BUILD_DIR, DISPLAY_DIR)
 
     pages = []
     for qmd in render_files:
@@ -962,6 +975,13 @@ def watch_and_serve(no_browser: bool = False, webtex: bool = False):
                 rel = ""
             display_root = DISPLAY_DIR.resolve()
             build_root = BUILD_DIR.resolve()
+            if rel == "_build":
+                return str(build_root)
+            if rel.startswith("_build/"):
+                inner = rel.split("/", 1)[1]
+                candidate = (BUILD_DIR / inner).resolve()
+                if str(candidate).startswith(str(build_root)) and candidate.exists():
+                    return str(candidate)
             display_candidate = (DISPLAY_DIR / rel).resolve()
             if (
                 display_candidate.exists()
