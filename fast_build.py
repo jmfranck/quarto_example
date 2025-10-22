@@ -673,39 +673,52 @@ def add_navigation(html_path: Path, pages: list[dict], current: str):
 def postprocess_html(html_path: Path, include_root: Path, resource_root: Path):
     """Replace placeholder nodes with referenced HTML bodies."""
     root = lxml_html.fromstring(html_path.read_text())
-    for node in list(root.xpath("//*[@data-include] | //*[@data-embed]")):
-        target_rel = node.get("data-source")
-        if not target_rel:
-            target_rel = node.get("data-include") or node.get("data-embed")
-        target = (include_root / target_rel).resolve()
-        if target.exists():
-            # announce include substitutions so the console logs which staged
-            # fragments feed each served page
-            try:
-                dest_rel = html_path.relative_to(DISPLAY_DIR).as_posix()
-            except ValueError:
-                dest_rel = html_path.name
-            print(f"including {target_rel} into {dest_rel}")
-            frag_text = target.read_text()
-            frag = lxml_html.fromstring(frag_text)
-            body = frag.xpath("body")
-            if body:
-                elems = list(body[0])
-            else:
-                elems = [frag]
-            parent = node.getparent()
-            idx = parent.index(node)
-            parent.remove(node)
-            end_c = lxml_html.HtmlComment(f"END include {target_rel}")
-            start_c = lxml_html.HtmlComment(f"BEGIN include {target_rel}")
-            parent.insert(idx, end_c)
-            for elem in reversed(elems):
-                parent.insert(idx, elem)
-            parent.insert(idx, start_c)
-        else:
-            parent = node.getparent()
-            if parent is not None:
+    # keep processing until no include placeholders remain so nested includes
+    # are fully expanded in the served HTML
+    while True:
+        nodes = list(root.xpath("//*[@data-include] | //*[@data-embed]"))
+        if not nodes:
+            break
+        progress = False
+        for node in nodes:
+            target_rel = node.get("data-source")
+            if not target_rel:
+                target_rel = node.get("data-include") or node.get("data-embed")
+            target = (include_root / target_rel).resolve()
+            if target.exists():
+                # announce include substitutions so the console logs which staged
+                # fragments feed each served page
+                try:
+                    dest_rel = html_path.relative_to(DISPLAY_DIR).as_posix()
+                except ValueError:
+                    dest_rel = html_path.name
+                print(f"including {target_rel} into {dest_rel}")
+                frag_text = target.read_text()
+                frag = lxml_html.fromstring(frag_text)
+                body = frag.xpath("body")
+                if body:
+                    elems = list(body[0])
+                else:
+                    elems = [frag]
+                parent = node.getparent()
+                if parent is None:
+                    continue
+                idx = parent.index(node)
                 parent.remove(node)
+                end_c = lxml_html.HtmlComment(f"END include {target_rel}")
+                start_c = lxml_html.HtmlComment(f"BEGIN include {target_rel}")
+                parent.insert(idx, end_c)
+                for elem in reversed(elems):
+                    parent.insert(idx, elem)
+                parent.insert(idx, start_c)
+                progress = True
+            else:
+                parent = node.getparent()
+                if parent is not None:
+                    parent.remove(node)
+                    progress = True
+        if not progress:
+            break
     # ensure MathJax references point at the provided resource root so the
     # served HTML loads scripts from the display tree instead of the staging
     # area.

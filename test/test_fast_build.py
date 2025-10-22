@@ -111,3 +111,29 @@ def test_render_file_webtex(tmp_path, monkeypatch):
     fb.render_file(src, dest, fragment=False, webtex=True)
     assert '--webtex' in called['args']
     assert not any(a.startswith('--mathjax') for a in called['args'])
+
+
+def test_postprocess_nested_includes(tmp_path, monkeypatch):
+    fb = import_fast_build()
+    build_dir = tmp_path / 'build'
+    display_dir = tmp_path / 'display'
+    build_dir.mkdir()
+    display_dir.mkdir()
+    monkeypatch.setattr(fb, 'BUILD_DIR', build_dir)
+    monkeypatch.setattr(fb, 'DISPLAY_DIR', display_dir)
+
+    (build_dir / 'leaf.html').write_text('<div>LEAF</div>')
+    (build_dir / 'child.html').write_text(
+        '<div data-include="leaf.html" data-source="leaf.html"></div>'
+    )
+    (build_dir / 'root.html').write_text(
+        '<section><div data-include="child.html" data-source="child.html"></div></section>'
+    )
+
+    target = display_dir / 'root.html'
+    target.write_text((build_dir / 'root.html').read_text())
+
+    fb.postprocess_html(target, build_dir, build_dir)
+    html = target.read_text()
+    assert 'LEAF' in html
+    assert 'data-include' not in html
