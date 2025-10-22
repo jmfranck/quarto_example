@@ -679,6 +679,13 @@ def postprocess_html(html_path: Path, include_root: Path, resource_root: Path):
             target_rel = node.get("data-include") or node.get("data-embed")
         target = (include_root / target_rel).resolve()
         if target.exists():
+            # announce include substitutions so the console logs which staged
+            # fragments feed each served page
+            try:
+                dest_rel = html_path.relative_to(DISPLAY_DIR).as_posix()
+            except ValueError:
+                dest_rel = html_path.name
+            print(f"including {target_rel} into {dest_rel}")
             frag_text = target.read_text()
             frag = lxml_html.fromstring(frag_text)
             body = frag.xpath("body")
@@ -824,7 +831,24 @@ def build_all(webtex: bool = False, changed_paths=None):
                 "include_map": include_map,
             }
     else:
-        stage_set = set(files)
+        stage_set = set()
+        # only rebuild staged HTML when the source is newer or the staged
+        # fragment is missing so existing work in _build can be reused on
+        # startup
+        for f in files:
+            src_path = PROJECT_ROOT / f
+            html_path = (BUILD_DIR / f).with_suffix(".html")
+            if not html_path.exists():
+                stage_set.add(f)
+                continue
+            try:
+                src_time = src_path.stat().st_mtime
+                html_time = html_path.stat().st_mtime
+            except FileNotFoundError:
+                stage_set.add(f)
+                continue
+            if src_time > html_time:
+                stage_set.add(f)
         display_targets = set(render_files)
 
     stage_files = sorted(stage_set)
